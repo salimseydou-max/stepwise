@@ -2,34 +2,28 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   BookOpenText,
-  BrainCircuit,
   ChartNoAxesColumn,
   ChevronRight,
+  Flame,
+  Home,
   Languages,
   Menu,
   MoonStar,
-  PanelsTopLeft,
   Search,
-  SendHorizontal,
-  Settings2,
   Sparkles,
   SunMedium,
-  Trash2,
-  Users,
+  Trophy,
+  UserRound,
   X,
 } from 'lucide-react'
 import './App.css'
 
-import challengesReference from '../challenges.png'
-import homeReference from '../home.png'
-import homeworkReference from '../homework.png'
-import profileReference from '../profile (1).png'
-import progressReference from '../progress.png'
-
-type Screen = 'dashboard' | 'solver' | 'community' | 'progress' | 'settings'
+type Screen = 'home' | 'homework' | 'challenges' | 'progress' | 'profile'
 type Theme = 'dark' | 'light'
 type Language = 'en' | 'es' | 'fr'
 type MessageRole = 'user' | 'assistant'
+type ChallengeId = 'daily-math' | 'science-quiz' | 'quick-practice'
+type SubjectId = 'math' | 'science' | 'english' | 'history' | 'physics' | 'chemistry'
 
 type SearchEntry = {
   id: string
@@ -44,24 +38,47 @@ type ChatMessage = {
   timestamp: number
 }
 
-type CommunityAnswer = {
+type CompletionEntry = {
   id: string
-  text: string
-  timestamp: number
-}
-
-type CommunityPost = {
-  id: string
+  completionKey: string
   question: string
-  timestamp: number
-  answers: CommunityAnswer[]
-}
-
-type CompletedHomework = {
-  id: string
-  question: string
-  summary: string
   completedAt: number
+  dayKey: string
+  points: number
+  summary: string
+  sourceLabel: string
+}
+
+type ChallengeState = Record<ChallengeId, { interacted: boolean; completed: boolean }>
+
+type LaunchContext = {
+  prompt: string
+  source: 'search' | 'challenge' | 'subject' | 'quick-action'
+  rewardPoints?: number
+  completionKey?: string
+  challengeId?: ChallengeId
+  sourceLabel?: string
+}
+
+type ChallengeDefinition = {
+  id: ChallengeId
+  title: string
+  description: string
+  difficulty: string
+  points: number
+  icon: string
+  tone: 'orange' | 'pink' | 'green'
+  startsNew: boolean
+  prompt: string
+  showChevron?: boolean
+}
+
+type SubjectDefinition = {
+  id: SubjectId
+  title: string
+  icon: string
+  tone: SubjectId
+  prompt: string
 }
 
 type TranslationKey = keyof typeof translations.en
@@ -70,1097 +87,1000 @@ type Translate = (key: TranslationKey, variables?: Record<string, string | numbe
 
 const STORAGE_KEYS = {
   recentSearches: 'stepwise.recentSearches',
-  communityPosts: 'stepwise.communityPosts',
-  completedHomework: 'stepwise.completedHomework',
-  language: 'stepwise.language',
+  completedItems: 'stepwise.completedItems',
+  challengeState: 'stepwise.challengeState',
   theme: 'stepwise.theme',
+  language: 'stepwise.language',
   username: 'stepwise.username',
 } as const
 
-const screenPreviewImages = [
-  homeReference,
-  homeworkReference,
-  progressReference,
-  challengesReference,
-  profileReference,
-]
+const DAILY_GOAL = 5
+const DEFAULT_USERNAME = 'User'
+
+const initialChallengeState: ChallengeState = {
+  'daily-math': { interacted: false, completed: false },
+  'science-quiz': { interacted: false, completed: false },
+  'quick-practice': { interacted: false, completed: false },
+}
 
 const translations = {
   en: {
-    brand: 'StepWise AI',
-    navDashboard: 'Dashboard',
-    navSolver: 'AI Solver',
-    navCommunity: 'Community',
+    brand: 'StepWise',
+    tagline: 'Learn & Have Fun! ✨',
+    navHome: 'Home',
+    navHomework: 'Homework',
+    navChallenges: 'Challenges',
     navProgress: 'Progress',
-    navSettings: 'Settings',
-    dashboardLabel: 'Dashboard',
-    dashboardTitle: 'Stay on top of every homework task.',
-    dashboardSubtitle:
-      'Search a question, jump into AI help, revisit recent activity, and keep your study workflow moving.',
-    welcomeBack: 'Welcome back, {name}',
-    searchPlaceholder: 'Search your homework question...',
-    searchButton: 'Search',
-    searchValidation: 'Please enter a homework question first.',
-    searchHint: 'Press Enter to send your question straight to the AI Homework Solver.',
-    quickActions: 'Quick actions',
-    solveHomework: 'Solve Homework',
-    askAI: 'Ask AI',
-    communityAction: 'Community',
-    recentSearches: 'Recent searches',
-    noRecentActivity: 'No recent activity',
-    completedCount: 'Completed homework',
-    communityQuestions: 'Community questions',
-    preferredLanguage: 'Preferred language',
-    designMatched: 'Responsive web recreation',
-    designMatchedText:
-      'The layout uses the attached screen designs as the visual direction while adding full app behavior and local persistence.',
-    solverLabel: 'AI Homework Solver',
-    solverTitle: 'Get clear homework help in a chat-style workspace.',
-    solverSubtitle:
-      'Ask follow-up questions, get structured explanations, and keep context during the session.',
-    solverInputPlaceholder: 'Type a homework question or follow-up...',
-    sendMessage: 'Send message',
-    solverEmptyState: 'Start by asking a homework question and I will break it down clearly.',
-    solverThinking: 'Thinking through your homework...',
-    solverLongWarning: 'Your message is too long. Please shorten it before sending.',
-    solverTipsTitle: 'How StepWise responds',
-    solverTipOne: 'Explains the concept before solving.',
-    solverTipTwo: 'Shows step-by-step reasoning.',
-    solverTipThree: 'Ends with a clearly labeled final answer.',
-    communityLabel: 'Community',
-    communityTitle: 'Ask classmates and build answers together.',
-    communitySubtitle:
-      'Post a question, open any discussion, and add multiple answers without leaving the app.',
-    communityPlaceholder: 'Ask the community a question...',
-    communityValidation: 'Please enter a question before posting.',
-    communityPostButton: 'Post question',
-    communityNoPosts: 'No questions yet',
-    communityAnswers: 'Answers',
-    communityNoAnswers: 'No answers yet',
-    answerPlaceholder: 'Write an answer...',
-    answerValidation: 'Please enter an answer before posting.',
-    addAnswer: 'Add answer',
-    collapse: 'Collapse',
-    expand: 'Expand',
-    progressLabel: 'Progress',
-    progressTitle: 'Track the homework you complete with AI support.',
-    progressSubtitle:
-      'Every successful solver response is recorded automatically so progress updates in real time.',
-    progressTotal: 'Completed Homework',
+    navProfile: 'Profile',
+    greeting: 'Hey {name}! 👋',
+    subtitle: 'Get step-by-step explanations',
+    searchPlaceholder: 'Type your question...',
+    searchValidation: 'Please type a homework question first.',
+    howItWorks: 'How StepWise Works',
+    howItWorksSub: 'Step-by-step guidance to help you understand concepts',
+    stepAsk: 'Ask',
+    stepLearn: 'Learn',
+    stepSolve: 'Solve',
+    tryNow: 'Try It Now',
+    progressTitle: 'Your Progress',
+    streak: 'Streak',
+    today: 'Today',
+    total: 'Total',
+    dailyGoal: 'Daily Goal: {count} Problems',
+    challenges: 'Challenges',
+    newCount: '{count} New',
+    dailyMath: 'Daily Math Challenge',
+    dailyMathDesc: 'Solve 5 math problems today!',
+    scienceQuiz: 'Science Quiz',
+    scienceQuizDesc: 'Complete 3 science questions',
+    quickPractice: 'Quick Practice',
+    quickPracticeDesc: 'Practice 10 problems in any subject',
+    easy: 'EASY',
+    medium: 'MEDIUM',
+    hard: 'HARD',
+    leaderboard: 'Leaderboard',
+    viewAll: 'View All',
+    you: '(You)',
+    points: 'pts',
+    subjects: 'Subjects',
+    subjectMath: 'Math',
+    subjectScience: 'Science',
+    subjectEnglish: 'English',
+    subjectHistory: 'History',
+    subjectPhysics: 'Physics',
+    subjectChemistry: 'Chemistry',
+    homeworkTitle: 'Homework Solver',
+    homeworkSubtitle: 'Ask a homework question and get a structured explanation with clear steps.',
+    homeworkPlaceholder: 'Ask StepWise a homework question...',
+    send: 'Send',
+    solverEmpty: 'Your homework conversation will appear here.',
+    solverLoading: 'StepWise is working on your question...',
+    solverLongWarning: 'Your question is too long. Please shorten it before sending.',
+    challengesTitle: 'Practice from your active challenges.',
+    challengesSubtitle: 'Open any challenge to continue and earn points.',
+    progressPageTitle: 'Track every completed problem in one place.',
     progressEmpty: 'No progress yet',
     completedOn: 'Completed on',
-    progressLatest: 'Latest completed work',
-    settingsLabel: 'Settings',
-    settingsTitle: 'Personalize how the app looks and behaves.',
-    settingsSubtitle:
-      'Update your profile, switch themes, change language, and clear stored data whenever you need to.',
-    profileSection: 'Profile',
+    profileTitle: 'Profile & Preferences',
+    profileSubtitle: 'Update your name, language, theme, and saved data.',
     usernameLabel: 'Username',
-    usernamePlaceholder: 'Enter your username',
-    usernameValidation: 'Please enter a username.',
-    saveProfile: 'Save profile',
-    appearanceSection: 'Appearance',
-    lightMode: 'Light',
-    darkMode: 'Dark',
-    languageSection: 'Language',
-    languageLabel: 'App language',
-    languageEnglish: 'English',
-    languageSpanish: 'Spanish',
-    languageFrench: 'French',
-    dataControls: 'Data controls',
-    clearChatHistory: 'Clear chat history',
-    clearRecentSearches: 'Clear recent searches',
+    usernamePlaceholder: 'Enter username',
+    saveProfile: 'Save',
+    languageLabel: 'Language',
+    themeLabel: 'Theme',
+    light: 'Light',
+    dark: 'Dark',
+    english: 'English',
+    spanish: 'Spanish',
+    french: 'French',
     clearProgress: 'Clear progress',
-    settingsSaved: 'Saved successfully.',
-    chatCleared: 'AI chat history cleared.',
-    searchesCleared: 'Recent searches cleared.',
-    progressCleared: 'Progress reset.',
-    postedAt: 'Posted',
-    activeNow: 'Active now',
-    goToCommunity: 'Open community',
-    goToSolver: 'Open AI Solver',
-    viewProgress: 'View progress',
+    clearSearches: 'Clear searches',
+    recentSearches: 'Recent Searches',
+    noRecentSearches: 'No recent activity',
+    poweredBy: 'Powered by AI ✨',
+    problemsSolved: '{count} problems!',
+    welcomeHomework: 'Homework',
+    welcomeChallenges: 'Challenges',
+    welcomeProgress: 'Progress',
+    welcomeProfile: 'Profile',
+    chatExplanation: 'Explanation',
+    chatSteps: 'Step-by-step solution',
+    chatFinal: 'Final Answer',
   },
   es: {
-    brand: 'StepWise AI',
-    navDashboard: 'Panel',
-    navSolver: 'Solucionador IA',
-    navCommunity: 'Comunidad',
+    brand: 'StepWise',
+    tagline: 'Aprende y diviértete ✨',
+    navHome: 'Inicio',
+    navHomework: 'Tarea',
+    navChallenges: 'Retos',
     navProgress: 'Progreso',
-    navSettings: 'Configuración',
-    dashboardLabel: 'Panel',
-    dashboardTitle: 'Mantente al día con cada tarea.',
-    dashboardSubtitle:
-      'Busca una pregunta, entra a la ayuda con IA, revisa la actividad reciente y mantén tu estudio en movimiento.',
-    welcomeBack: 'Bienvenida de nuevo, {name}',
-    searchPlaceholder: 'Busca tu pregunta de tarea...',
-    searchButton: 'Buscar',
+    navProfile: 'Perfil',
+    greeting: 'Hola {name}! 👋',
+    subtitle: 'Obtén explicaciones paso a paso',
+    searchPlaceholder: 'Escribe tu pregunta...',
     searchValidation: 'Primero escribe una pregunta de tarea.',
-    searchHint: 'Pulsa Enter para enviar tu pregunta directamente al Solucionador IA.',
-    quickActions: 'Acciones rápidas',
-    solveHomework: 'Resolver tarea',
-    askAI: 'Preguntar a la IA',
-    communityAction: 'Comunidad',
-    recentSearches: 'Búsquedas recientes',
-    noRecentActivity: 'No hay actividad reciente',
-    completedCount: 'Tareas completadas',
-    communityQuestions: 'Preguntas de la comunidad',
-    preferredLanguage: 'Idioma preferido',
-    designMatched: 'Recreación web adaptable',
-    designMatchedText:
-      'El diseño usa las pantallas adjuntas como dirección visual mientras añade comportamiento real de la app y persistencia local.',
-    solverLabel: 'Solucionador IA',
-    solverTitle: 'Obtén ayuda clara en un espacio de chat.',
-    solverSubtitle:
-      'Haz preguntas de seguimiento, recibe explicaciones estructuradas y mantén el contexto durante la sesión.',
-    solverInputPlaceholder: 'Escribe una pregunta de tarea o seguimiento...',
-    sendMessage: 'Enviar mensaje',
-    solverEmptyState: 'Empieza con una pregunta de tarea y la explicaré con claridad.',
-    solverThinking: 'Pensando en tu tarea...',
-    solverLongWarning: 'Tu mensaje es demasiado largo. Acórtalo antes de enviarlo.',
-    solverTipsTitle: 'Cómo responde StepWise',
-    solverTipOne: 'Explica el concepto antes de resolver.',
-    solverTipTwo: 'Muestra el proceso paso a paso.',
-    solverTipThree: 'Termina con una respuesta final claramente etiquetada.',
-    communityLabel: 'Comunidad',
-    communityTitle: 'Pregunta a tus compañeros y construyan respuestas juntos.',
-    communitySubtitle:
-      'Publica una pregunta, abre cualquier discusión y añade varias respuestas sin recargar la app.',
-    communityPlaceholder: 'Pregunta a la comunidad...',
-    communityValidation: 'Escribe una pregunta antes de publicar.',
-    communityPostButton: 'Publicar pregunta',
-    communityNoPosts: 'Aún no hay preguntas',
-    communityAnswers: 'Respuestas',
-    communityNoAnswers: 'Aún no hay respuestas',
-    answerPlaceholder: 'Escribe una respuesta...',
-    answerValidation: 'Escribe una respuesta antes de publicarla.',
-    addAnswer: 'Agregar respuesta',
-    collapse: 'Ocultar',
-    expand: 'Expandir',
-    progressLabel: 'Progreso',
-    progressTitle: 'Sigue la tarea que completas con ayuda de IA.',
-    progressSubtitle:
-      'Cada respuesta exitosa del solucionador se guarda automáticamente para actualizar el progreso en tiempo real.',
-    progressTotal: 'Tareas completadas',
+    howItWorks: 'Cómo funciona StepWise',
+    howItWorksSub: 'Guía paso a paso para ayudarte a entender conceptos',
+    stepAsk: 'Preguntar',
+    stepLearn: 'Aprender',
+    stepSolve: 'Resolver',
+    tryNow: 'Probar ahora',
+    progressTitle: 'Tu progreso',
+    streak: 'Racha',
+    today: 'Hoy',
+    total: 'Total',
+    dailyGoal: 'Meta diaria: {count} problemas',
+    challenges: 'Retos',
+    newCount: '{count} nuevos',
+    dailyMath: 'Reto diario de matemáticas',
+    dailyMathDesc: 'Resuelve 5 problemas de matemáticas hoy',
+    scienceQuiz: 'Cuestionario de ciencia',
+    scienceQuizDesc: 'Completa 3 preguntas de ciencia',
+    quickPractice: 'Práctica rápida',
+    quickPracticeDesc: 'Practica 10 problemas de cualquier materia',
+    easy: 'FÁCIL',
+    medium: 'MEDIO',
+    hard: 'DIFÍCIL',
+    leaderboard: 'Clasificación',
+    viewAll: 'Ver todo',
+    you: '(Tú)',
+    points: 'pts',
+    subjects: 'Materias',
+    subjectMath: 'Matemáticas',
+    subjectScience: 'Ciencia',
+    subjectEnglish: 'Inglés',
+    subjectHistory: 'Historia',
+    subjectPhysics: 'Física',
+    subjectChemistry: 'Química',
+    homeworkTitle: 'Solucionador de tareas',
+    homeworkSubtitle: 'Haz una pregunta y recibe una explicación estructurada con pasos claros.',
+    homeworkPlaceholder: 'Pregunta a StepWise sobre tu tarea...',
+    send: 'Enviar',
+    solverEmpty: 'Tu conversación de tarea aparecerá aquí.',
+    solverLoading: 'StepWise está trabajando en tu pregunta...',
+    solverLongWarning: 'Tu pregunta es demasiado larga. Acórtala antes de enviarla.',
+    challengesTitle: 'Practica desde tus retos activos.',
+    challengesSubtitle: 'Abre cualquier reto para continuar y ganar puntos.',
+    progressPageTitle: 'Sigue cada problema completado en un solo lugar.',
     progressEmpty: 'Todavía no hay progreso',
     completedOn: 'Completado el',
-    progressLatest: 'Trabajo completado recientemente',
-    settingsLabel: 'Configuración',
-    settingsTitle: 'Personaliza cómo se ve y funciona la app.',
-    settingsSubtitle:
-      'Actualiza tu perfil, cambia el tema, cambia el idioma y borra datos guardados cuando lo necesites.',
-    profileSection: 'Perfil',
+    profileTitle: 'Perfil y preferencias',
+    profileSubtitle: 'Actualiza tu nombre, idioma, tema y datos guardados.',
     usernameLabel: 'Nombre de usuario',
-    usernamePlaceholder: 'Escribe tu nombre de usuario',
-    usernameValidation: 'Escribe un nombre de usuario.',
-    saveProfile: 'Guardar perfil',
-    appearanceSection: 'Apariencia',
-    lightMode: 'Claro',
-    darkMode: 'Oscuro',
-    languageSection: 'Idioma',
-    languageLabel: 'Idioma de la aplicación',
-    languageEnglish: 'Inglés',
-    languageSpanish: 'Español',
-    languageFrench: 'Francés',
-    dataControls: 'Controles de datos',
-    clearChatHistory: 'Borrar historial del chat',
-    clearRecentSearches: 'Borrar búsquedas recientes',
+    usernamePlaceholder: 'Escribe tu nombre',
+    saveProfile: 'Guardar',
+    languageLabel: 'Idioma',
+    themeLabel: 'Tema',
+    light: 'Claro',
+    dark: 'Oscuro',
+    english: 'Inglés',
+    spanish: 'Español',
+    french: 'Francés',
     clearProgress: 'Borrar progreso',
-    settingsSaved: 'Guardado correctamente.',
-    chatCleared: 'Se borró el historial del chat de IA.',
-    searchesCleared: 'Se borraron las búsquedas recientes.',
-    progressCleared: 'Se reinició el progreso.',
-    postedAt: 'Publicado',
-    activeNow: 'Activo ahora',
-    goToCommunity: 'Abrir comunidad',
-    goToSolver: 'Abrir solucionador IA',
-    viewProgress: 'Ver progreso',
+    clearSearches: 'Borrar búsquedas',
+    recentSearches: 'Búsquedas recientes',
+    noRecentSearches: 'No hay actividad reciente',
+    poweredBy: 'Impulsado por IA ✨',
+    problemsSolved: '{count} problemas!',
+    welcomeHomework: 'Tarea',
+    welcomeChallenges: 'Retos',
+    welcomeProgress: 'Progreso',
+    welcomeProfile: 'Perfil',
+    chatExplanation: 'Explicación',
+    chatSteps: 'Solución paso a paso',
+    chatFinal: 'Respuesta final',
   },
   fr: {
-    brand: 'StepWise AI',
-    navDashboard: 'Tableau de bord',
-    navSolver: 'Assistant IA',
-    navCommunity: 'Communauté',
+    brand: 'StepWise',
+    tagline: 'Apprendre et s’amuser ✨',
+    navHome: 'Accueil',
+    navHomework: 'Devoirs',
+    navChallenges: 'Défis',
     navProgress: 'Progrès',
-    navSettings: 'Paramètres',
-    dashboardLabel: 'Tableau de bord',
-    dashboardTitle: 'Gardez le contrôle sur chaque devoir.',
-    dashboardSubtitle:
-      'Recherchez une question, lancez l’aide IA, retrouvez l’activité récente et gardez votre rythme de travail.',
-    welcomeBack: 'Bon retour, {name}',
-    searchPlaceholder: 'Recherchez votre question de devoir...',
-    searchButton: 'Rechercher',
+    navProfile: 'Profil',
+    greeting: 'Salut {name}! 👋',
+    subtitle: 'Obtenez des explications étape par étape',
+    searchPlaceholder: 'Tapez votre question...',
     searchValidation: 'Veuillez d’abord saisir une question de devoir.',
-    searchHint: 'Appuyez sur Entrée pour envoyer la question directement à l’Assistant IA.',
-    quickActions: 'Actions rapides',
-    solveHomework: 'Résoudre un devoir',
-    askAI: 'Demander à l’IA',
-    communityAction: 'Communauté',
-    recentSearches: 'Recherches récentes',
-    noRecentActivity: 'Aucune activité récente',
-    completedCount: 'Devoirs terminés',
-    communityQuestions: 'Questions de la communauté',
-    preferredLanguage: 'Langue préférée',
-    designMatched: 'Recréation web responsive',
-    designMatchedText:
-      'La mise en page suit les écrans PNG fournis tout en ajoutant une vraie logique applicative et une persistance locale.',
-    solverLabel: 'Assistant IA',
-    solverTitle: 'Obtenez une aide claire dans un espace de chat.',
-    solverSubtitle:
-      'Posez des questions de suivi, recevez des explications structurées et gardez le contexte pendant la session.',
-    solverInputPlaceholder: 'Saisissez une question de devoir ou un suivi...',
-    sendMessage: 'Envoyer',
-    solverEmptyState: 'Commencez par une question de devoir et je la décomposerai clairement.',
-    solverThinking: 'Réflexion sur votre devoir...',
-    solverLongWarning: 'Votre message est trop long. Raccourcissez-le avant de l’envoyer.',
-    solverTipsTitle: 'Comment StepWise répond',
-    solverTipOne: 'Explique le concept avant de résoudre.',
-    solverTipTwo: 'Montre une solution étape par étape.',
-    solverTipThree: 'Se termine par une réponse finale clairement indiquée.',
-    communityLabel: 'Communauté',
-    communityTitle: 'Posez une question et construisez des réponses ensemble.',
-    communitySubtitle:
-      'Publiez une question, ouvrez une discussion et ajoutez plusieurs réponses sans rechargement.',
-    communityPlaceholder: 'Posez une question à la communauté...',
-    communityValidation: 'Veuillez saisir une question avant de publier.',
-    communityPostButton: 'Publier la question',
-    communityNoPosts: 'Aucune question pour le moment',
-    communityAnswers: 'Réponses',
-    communityNoAnswers: 'Aucune réponse pour le moment',
-    answerPlaceholder: 'Rédigez une réponse...',
-    answerValidation: 'Veuillez saisir une réponse avant de publier.',
-    addAnswer: 'Ajouter une réponse',
-    collapse: 'Réduire',
-    expand: 'Développer',
-    progressLabel: 'Progrès',
-    progressTitle: 'Suivez les devoirs terminés avec l’aide de l’IA.',
-    progressSubtitle:
-      'Chaque réponse réussie de l’assistant est enregistrée automatiquement pour mettre à jour les progrès en temps réel.',
-    progressTotal: 'Devoirs terminés',
+    howItWorks: 'Comment StepWise fonctionne',
+    howItWorksSub: 'Une aide étape par étape pour comprendre les concepts',
+    stepAsk: 'Demander',
+    stepLearn: 'Comprendre',
+    stepSolve: 'Résoudre',
+    tryNow: 'Essayer',
+    progressTitle: 'Votre progression',
+    streak: 'Série',
+    today: 'Aujourd’hui',
+    total: 'Total',
+    dailyGoal: 'Objectif du jour : {count} problèmes',
+    challenges: 'Défis',
+    newCount: '{count} nouveaux',
+    dailyMath: 'Défi math du jour',
+    dailyMathDesc: 'Résous 5 problèmes de maths aujourd’hui',
+    scienceQuiz: 'Quiz de sciences',
+    scienceQuizDesc: 'Complète 3 questions de sciences',
+    quickPractice: 'Pratique rapide',
+    quickPracticeDesc: 'Pratique 10 problèmes dans n’importe quelle matière',
+    easy: 'FACILE',
+    medium: 'MOYEN',
+    hard: 'DIFFICILE',
+    leaderboard: 'Classement',
+    viewAll: 'Voir tout',
+    you: '(Vous)',
+    points: 'pts',
+    subjects: 'Matières',
+    subjectMath: 'Maths',
+    subjectScience: 'Science',
+    subjectEnglish: 'Anglais',
+    subjectHistory: 'Histoire',
+    subjectPhysics: 'Physique',
+    subjectChemistry: 'Chimie',
+    homeworkTitle: 'Assistant devoirs',
+    homeworkSubtitle: 'Posez une question et obtenez une explication structurée avec des étapes claires.',
+    homeworkPlaceholder: 'Posez une question à StepWise...',
+    send: 'Envoyer',
+    solverEmpty: 'Votre conversation de devoirs apparaîtra ici.',
+    solverLoading: 'StepWise travaille sur votre question...',
+    solverLongWarning: 'Votre question est trop longue. Veuillez la raccourcir.',
+    challengesTitle: 'Travaillez depuis vos défis actifs.',
+    challengesSubtitle: 'Ouvrez un défi pour continuer et gagner des points.',
+    progressPageTitle: 'Suivez chaque problème terminé au même endroit.',
     progressEmpty: 'Aucun progrès pour le moment',
     completedOn: 'Terminé le',
-    progressLatest: 'Travail terminé récemment',
-    settingsLabel: 'Paramètres',
-    settingsTitle: 'Personnalisez l’apparence et le comportement de l’application.',
-    settingsSubtitle:
-      'Mettez à jour votre profil, changez de thème, changez de langue et effacez les données enregistrées quand vous le souhaitez.',
-    profileSection: 'Profil',
+    profileTitle: 'Profil et préférences',
+    profileSubtitle: 'Mettez à jour votre nom, langue, thème et données enregistrées.',
     usernameLabel: 'Nom d’utilisateur',
-    usernamePlaceholder: 'Saisissez votre nom d’utilisateur',
-    usernameValidation: 'Veuillez saisir un nom d’utilisateur.',
-    saveProfile: 'Enregistrer le profil',
-    appearanceSection: 'Apparence',
-    lightMode: 'Clair',
-    darkMode: 'Sombre',
-    languageSection: 'Langue',
-    languageLabel: 'Langue de l’application',
-    languageEnglish: 'Anglais',
-    languageSpanish: 'Espagnol',
-    languageFrench: 'Français',
-    dataControls: 'Contrôles des données',
-    clearChatHistory: 'Effacer l’historique du chat',
-    clearRecentSearches: 'Effacer les recherches récentes',
+    usernamePlaceholder: 'Entrez votre nom',
+    saveProfile: 'Enregistrer',
+    languageLabel: 'Langue',
+    themeLabel: 'Thème',
+    light: 'Clair',
+    dark: 'Sombre',
+    english: 'Anglais',
+    spanish: 'Espagnol',
+    french: 'Français',
     clearProgress: 'Effacer les progrès',
-    settingsSaved: 'Enregistré avec succès.',
-    chatCleared: 'L’historique du chat IA a été effacé.',
-    searchesCleared: 'Les recherches récentes ont été effacées.',
-    progressCleared: 'Les progrès ont été réinitialisés.',
-    postedAt: 'Publié',
-    activeNow: 'Actif maintenant',
-    goToCommunity: 'Ouvrir la communauté',
-    goToSolver: 'Ouvrir l’assistant IA',
-    viewProgress: 'Voir les progrès',
+    clearSearches: 'Effacer les recherches',
+    recentSearches: 'Recherches récentes',
+    noRecentSearches: 'Aucune activité récente',
+    poweredBy: 'Propulsé par l’IA ✨',
+    problemsSolved: '{count} problèmes!',
+    welcomeHomework: 'Devoirs',
+    welcomeChallenges: 'Défis',
+    welcomeProgress: 'Progrès',
+    welcomeProfile: 'Profil',
+    chatExplanation: 'Explication',
+    chatSteps: 'Solution étape par étape',
+    chatFinal: 'Réponse finale',
   },
 } as const
 
 const responsePhrases = {
   en: {
-    explanation: 'Explanation',
-    steps: 'Step-by-step solution',
-    finalAnswer: 'Final Answer',
-    clarificationConcept:
-      'I need a little more detail before I can give an accurate solution. A complete problem statement helps me explain the right method instead of guessing.',
-    clarificationSteps: [
-      'Share the exact homework question, including numbers, instructions, or answer choices.',
-      'Tell me which part feels confusing so I can focus the explanation.',
-      'If there is a diagram or formula, describe it or paste it into the chat.',
-    ],
-    clarificationFinal:
-      'Please send the full question and I will respond with a complete explanation, steps, and final answer.',
-    mathConcept:
-      'This looks like a math or science problem, so the goal is to identify what is known, choose the governing rule or formula, and solve in a logical order.',
-    generalConcept:
-      'This looks more conceptual, so I will explain the idea first, then show a clean way to organize the response or solution.',
-    followUpPrefix: 'I am also using context from your earlier question:',
+    clarification:
+      'I need a little more detail before I can solve this accurately. Please share the full homework question or the exact part that is confusing.',
+    mathExplanation:
+      'This looks like a math or science task, so the key is to identify the known information, choose the right formula or principle, and solve carefully in order.',
+    generalExplanation:
+      'This looks more conceptual, so I will explain the main idea first and then organize the answer clearly.',
     mathSteps: [
-      'List the given information and label the unknown clearly.',
-      'Choose the formula, theorem, or principle that connects the known values to the unknown.',
-      'Substitute carefully, solve one step at a time, and check whether the result makes sense.',
+      'List what the problem gives you and identify the unknown.',
+      'Choose the formula, rule, or concept that connects the known values to the answer.',
+      'Work through the solution step by step and check whether the result makes sense.',
     ],
     generalSteps: [
-      'Restate the question in simpler words so the goal is clear.',
-      'Identify the key concept, evidence, or structure needed for a strong answer.',
-      'Turn that understanding into a complete response using the clearest explanation first.',
+      'Restate the question in simple words so the goal is clear.',
+      'Identify the key idea, evidence, or structure needed for a strong response.',
+      'Turn that understanding into a complete answer with the clearest explanation first.',
     ],
-    mathFinal:
-      'Use the method above on the values in your worksheet. If you share the exact numbers or equation, I can verify the exact result next.',
-    generalFinal:
-      'Build your final response around the explanation above, and I can refine it further if you send your draft or teacher prompt.',
+    finalMath:
+      'Apply those steps to your exact numbers or worksheet details, and I can verify the final result with you if you send them next.',
+    finalGeneral:
+      'Use that structure for your response, and I can refine it further if you share your draft or teacher prompt.',
+    followUp: 'Using context from your earlier question:',
   },
   es: {
-    explanation: 'Explicación',
-    steps: 'Solución paso a paso',
-    finalAnswer: 'Respuesta Final',
-    clarificationConcept:
-      'Necesito un poco más de detalle antes de darte una solución exacta. Un enunciado completo me permite explicar el método correcto sin adivinar.',
-    clarificationSteps: [
-      'Comparte la pregunta exacta, incluyendo números, instrucciones u opciones de respuesta.',
-      'Dime qué parte te confunde para enfocar mejor la explicación.',
-      'Si hay un diagrama o una fórmula, descríbelo o pégalo en el chat.',
-    ],
-    clarificationFinal:
-      'Envíame la pregunta completa y responderé con explicación, pasos y respuesta final.',
-    mathConcept:
-      'Parece un problema de matemáticas o ciencias, así que primero conviene identificar los datos, elegir la regla o fórmula adecuada y resolver con orden.',
-    generalConcept:
-      'Parece una pregunta más conceptual, así que primero explicaré la idea principal y luego mostraré una forma clara de organizar la respuesta.',
-    followUpPrefix: 'También estoy usando el contexto de tu pregunta anterior:',
+    clarification:
+      'Necesito un poco más de detalle para resolver esto con precisión. Comparte la pregunta completa o la parte exacta que te confunde.',
+    mathExplanation:
+      'Parece una tarea de matemáticas o ciencias, así que lo importante es identificar los datos, elegir la fórmula o el principio correcto y resolver con orden.',
+    generalExplanation:
+      'Parece una pregunta más conceptual, así que primero explicaré la idea principal y luego organizaré la respuesta con claridad.',
     mathSteps: [
-      'Anota la información dada y define claramente lo desconocido.',
-      'Elige la fórmula, teorema o principio que conecta los datos con lo que buscas.',
-      'Sustituye con cuidado, resuelve paso a paso y comprueba si el resultado tiene sentido.',
+      'Anota la información dada e identifica lo desconocido.',
+      'Elige la fórmula, regla o concepto que conecta los datos con la respuesta.',
+      'Resuelve paso a paso y comprueba si el resultado tiene sentido.',
     ],
     generalSteps: [
-      'Reformula la pregunta con palabras más simples para aclarar el objetivo.',
-      'Identifica el concepto clave, la evidencia o la estructura necesaria para una buena respuesta.',
-      'Convierte esa comprensión en una respuesta completa empezando por la explicación más clara.',
+      'Reformula la pregunta con palabras simples para aclarar el objetivo.',
+      'Identifica la idea clave, evidencia o estructura necesaria para una buena respuesta.',
+      'Convierte eso en una respuesta completa empezando por la explicación más clara.',
     ],
-    mathFinal:
-      'Aplica el método anterior a los valores de tu ejercicio. Si compartes los números o la ecuación exacta, puedo verificar el resultado preciso después.',
-    generalFinal:
-      'Construye tu respuesta final alrededor de la explicación anterior y puedo mejorarla si me compartes tu borrador o la consigna del profesor.',
+    finalMath:
+      'Aplica esos pasos a tus números exactos o al contenido de tu hoja, y puedo verificar el resultado final contigo después.',
+    finalGeneral:
+      'Usa esa estructura para tu respuesta y puedo mejorarla más si me compartes tu borrador o la consigna del profesor.',
+    followUp: 'Usando contexto de tu pregunta anterior:',
   },
   fr: {
-    explanation: 'Explication',
-    steps: 'Solution étape par étape',
-    finalAnswer: 'Réponse Finale',
-    clarificationConcept:
-      'J’ai besoin d’un peu plus de détails avant de donner une solution précise. Un énoncé complet me permet d’expliquer la bonne méthode sans deviner.',
-    clarificationSteps: [
-      'Partagez la question exacte avec les nombres, les consignes ou les choix de réponse.',
-      'Indiquez la partie qui vous bloque pour que je cible mieux l’explication.',
-      'S’il y a un schéma ou une formule, décrivez-le ou collez-le dans le chat.',
-    ],
-    clarificationFinal:
-      'Envoyez la question complète et je répondrai avec une explication, des étapes et une réponse finale.',
-    mathConcept:
-      'Cela ressemble à un problème de mathématiques ou de sciences : il faut donc repérer les données, choisir la règle ou la formule adaptée, puis résoudre dans le bon ordre.',
-    generalConcept:
-      'Cela semble plus conceptuel, donc je vais d’abord expliquer l’idée principale avant de montrer une manière claire d’organiser la réponse.',
-    followUpPrefix: 'Je tiens aussi compte de votre question précédente :',
+    clarification:
+      'J’ai besoin d’un peu plus de détails pour résoudre cela correctement. Partagez la question complète ou la partie exacte qui vous bloque.',
+    mathExplanation:
+      'Cela ressemble à un exercice de maths ou de sciences : il faut donc identifier les données, choisir la bonne formule ou le bon principe, puis résoudre dans l’ordre.',
+    generalExplanation:
+      'Cela semble plus conceptuel, donc je vais d’abord expliquer l’idée principale puis organiser la réponse clairement.',
     mathSteps: [
-      'Notez les informations données et identifiez clairement l’inconnue.',
-      'Choisissez la formule, le théorème ou le principe qui relie les données à ce que vous cherchez.',
-      'Remplacez soigneusement, résolvez étape par étape et vérifiez si le résultat est cohérent.',
+      'Notez les informations données et identifiez l’inconnue.',
+      'Choisissez la formule, la règle ou le concept qui relie les données à la réponse.',
+      'Résolvez étape par étape et vérifiez si le résultat est cohérent.',
     ],
     generalSteps: [
-      'Reformulez la question avec des mots plus simples pour clarifier l’objectif.',
-      'Repérez le concept clé, la preuve ou la structure nécessaire à une bonne réponse.',
-      'Transformez cette compréhension en une réponse complète en commençant par l’explication la plus claire.',
+      'Reformulez la question avec des mots simples pour clarifier l’objectif.',
+      'Repérez l’idée clé, la preuve ou la structure nécessaire à une bonne réponse.',
+      'Transformez cela en une réponse complète en commençant par l’explication la plus claire.',
     ],
-    mathFinal:
-      'Utilisez la méthode ci-dessus avec les valeurs de votre exercice. Si vous partagez les nombres ou l’équation exacte, je peux ensuite vérifier le résultat précis.',
-    generalFinal:
-      'Construisez votre réponse finale autour de l’explication ci-dessus, et je peux l’améliorer si vous m’envoyez votre brouillon ou la consigne du professeur.',
+    finalMath:
+      'Appliquez ces étapes à vos nombres exacts ou aux détails de votre feuille, et je pourrai vérifier le résultat final ensuite.',
+    finalGeneral:
+      'Utilisez cette structure pour votre réponse, et je peux l’améliorer davantage si vous partagez votre brouillon ou la consigne.',
+    followUp: 'En utilisant le contexte de votre question précédente :',
   },
 } as const
 
+function getChallenges(t: Translate): ChallengeDefinition[] {
+  return [
+    {
+      id: 'daily-math',
+      title: t('dailyMath'),
+      description: t('dailyMathDesc'),
+      difficulty: t('medium'),
+      points: 100,
+      icon: '🏆',
+      tone: 'orange',
+      startsNew: true,
+      prompt: 'Give me 5 medium math problems and guide me through each one step by step.',
+    },
+    {
+      id: 'science-quiz',
+      title: t('scienceQuiz'),
+      description: t('scienceQuizDesc'),
+      difficulty: t('hard'),
+      points: 150,
+      icon: '⭐',
+      tone: 'pink',
+      startsNew: false,
+      prompt: 'Start a 3-question science quiz and explain every answer step by step.',
+      showChevron: true,
+    },
+    {
+      id: 'quick-practice',
+      title: t('quickPractice'),
+      description: t('quickPracticeDesc'),
+      difficulty: t('easy'),
+      points: 75,
+      icon: '✨',
+      tone: 'green',
+      startsNew: true,
+      prompt: 'Give me 10 mixed practice questions across subjects and explain each solution clearly.',
+    },
+  ]
+}
+
+function getSubjects(t: Translate): SubjectDefinition[] {
+  return [
+    { id: 'math', title: t('subjectMath'), icon: '⌗', tone: 'math', prompt: 'Help me with a math problem and explain each step clearly.' },
+    { id: 'science', title: t('subjectScience'), icon: '◫', tone: 'science', prompt: 'Teach me a science concept and then quiz me with a short question.' },
+    { id: 'english', title: t('subjectEnglish'), icon: '◍', tone: 'english', prompt: 'Help me understand an English homework task with a clear explanation and model answer.' },
+    { id: 'history', title: t('subjectHistory'), icon: '⌘', tone: 'history', prompt: 'Help me review a history topic and explain the key events clearly.' },
+    { id: 'physics', title: t('subjectPhysics'), icon: '⚡', tone: 'physics', prompt: 'Give me a physics practice problem and solve it step by step.' },
+    { id: 'chemistry', title: t('subjectChemistry'), icon: '✣', tone: 'chemistry', prompt: 'Help me practice a chemistry question and explain the concept simply.' },
+  ]
+}
+
 function App() {
-  const [activeScreen, setActiveScreen] = useState<Screen>('dashboard')
+  const [screen, setScreen] = useState<Screen>('home')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [theme, setTheme] = useLocalStorageState<Theme>(STORAGE_KEYS.theme, 'dark')
   const [language, setLanguage] = useLocalStorageState<Language>(STORAGE_KEYS.language, 'en')
-  const [username, setUsername] = useLocalStorageState<string>(STORAGE_KEYS.username, 'Maya')
+  const [username, setUsername] = useLocalStorageState<string>(STORAGE_KEYS.username, '')
   const [recentSearches, setRecentSearches] = useLocalStorageState<SearchEntry[]>(STORAGE_KEYS.recentSearches, [])
-  const [communityPosts, setCommunityPosts] = useLocalStorageState<CommunityPost[]>(STORAGE_KEYS.communityPosts, [])
-  const [completedHomework, setCompletedHomework] = useLocalStorageState<CompletedHomework[]>(
-    STORAGE_KEYS.completedHomework,
-    [],
-  )
-  const [dashboardQuery, setDashboardQuery] = useState('')
-  const [dashboardNotice, setDashboardNotice] = useState('')
-  const [solverInput, setSolverInput] = useState('')
-  const [solverNotice, setSolverNotice] = useState('')
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
-  const [isSolverLoading, setIsSolverLoading] = useState(false)
-  const [pendingSolverQuery, setPendingSolverQuery] = useState<string | null>(null)
-  const [communityInput, setCommunityInput] = useState('')
-  const [communityNotice, setCommunityNotice] = useState('')
-  const [expandedPosts, setExpandedPosts] = useState<Record<string, boolean>>({})
-  const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({})
-  const [answerNotices, setAnswerNotices] = useState<Record<string, string>>({})
-  const [settingsNameDraft, setSettingsNameDraft] = useState(username)
-  const [settingsNotice, setSettingsNotice] = useState('')
-  const chatEndRef = useRef<HTMLDivElement | null>(null)
+  const [completedItems, setCompletedItems] = useLocalStorageState<CompletionEntry[]>(STORAGE_KEYS.completedItems, [])
+  const [challengeState, setChallengeState] = useLocalStorageState<ChallengeState>(STORAGE_KEYS.challengeState, initialChallengeState)
+  const [searchInput, setSearchInput] = useState('')
+  const [homeNotice, setHomeNotice] = useState('')
+  const [homeworkInput, setHomeworkInput] = useState('')
+  const [homeworkNotice, setHomeworkNotice] = useState('')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [queuedLaunch, setQueuedLaunch] = useState<LaunchContext | null>(null)
+  const [profileName, setProfileName] = useState(username)
+
   const t = useTranslator(language)
+  const displayName = username.trim() || DEFAULT_USERNAME
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
-  const navigationItems = useMemo(
-    () => [
-      { id: 'dashboard' as const, label: t('navDashboard'), icon: PanelsTopLeft },
-      { id: 'solver' as const, label: t('navSolver'), icon: Sparkles },
-      { id: 'community' as const, label: t('navCommunity'), icon: Users },
-      { id: 'progress' as const, label: t('navProgress'), icon: ChartNoAxesColumn },
-      { id: 'settings' as const, label: t('navSettings'), icon: Settings2 },
-    ],
-    [t],
-  )
-
-  const sortedPosts = useMemo(
-    () => [...communityPosts].sort((left, right) => right.timestamp - left.timestamp),
-    [communityPosts],
-  )
+  const challenges = useMemo(() => getChallenges(t), [t])
+  const subjects = useMemo(() => getSubjects(t), [t])
+  const todayKey = dayKey(Date.now())
+  const todaySolved = completedItems.filter((item) => item.dayKey === todayKey).length
+  const totalSolved = completedItems.length
+  const totalPoints = completedItems.reduce((sum, item) => sum + item.points, 0)
+  const streak = calculateStreak(completedItems)
+  const progressPercent = Math.min(100, (todaySolved / DAILY_GOAL) * 100)
+  const unseenCount = challenges.filter((challenge) => challenge.startsNew && !challengeState[challenge.id]?.interacted).length
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
 
   useEffect(() => {
-    setSettingsNameDraft(username)
+    setProfileName(username)
   }, [username])
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chatMessages, isSolverLoading])
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isLoading])
 
   useEffect(() => {
-    if (activeScreen !== 'solver' || pendingSolverQuery === null || isSolverLoading) {
+    if (screen !== 'homework' || queuedLaunch === null || isLoading) {
       return
     }
 
-    const query = pendingSolverQuery
-    setPendingSolverQuery(null)
-    handleSolverSend(query)
-  }, [activeScreen, pendingSolverQuery, isSolverLoading])
+    const launch = queuedLaunch
+    setQueuedLaunch(null)
+    sendHomeworkMessage(launch.prompt, launch)
+  }, [screen, queuedLaunch, isLoading])
 
-  function navigateTo(screen: Screen) {
-    setActiveScreen(screen)
+  function openScreen(next: Screen) {
+    setScreen(next)
     setSidebarOpen(false)
-    setDashboardNotice('')
-    setCommunityNotice('')
-    setSolverNotice('')
-    setSettingsNotice('')
+    setHomeNotice('')
+    setHomeworkNotice('')
   }
 
-  function recordRecentSearch(query: string) {
+  function storeSearch(query: string) {
     setRecentSearches((current) => {
-      const nextEntry: SearchEntry = { id: createId(), query, timestamp: Date.now() }
-      return [nextEntry, ...current.filter((item) => item.query.toLowerCase() !== query.toLowerCase())].slice(0, 10)
+      const entry: SearchEntry = { id: createId(), query, timestamp: Date.now() }
+      return [entry, ...current.filter((item) => item.query.toLowerCase() !== query.toLowerCase())].slice(0, 10)
     })
   }
 
-  function openSolverWithQuery(query: string) {
-    const cleaned = query.trim()
+  function launchHomework(prompt: string, launch?: Omit<LaunchContext, 'prompt'>) {
+    const cleaned = prompt.trim()
+
     if (!cleaned) {
-      setDashboardNotice(t('searchValidation'))
+      setHomeNotice(t('searchValidation'))
       return
     }
 
-    recordRecentSearch(cleaned)
-    setDashboardQuery('')
-    setDashboardNotice('')
-    setSolverInput(cleaned)
-    setPendingSolverQuery(cleaned)
-    navigateTo('solver')
+    if (launch?.source === 'search') {
+      storeSearch(cleaned)
+    }
+
+    setHomeNotice('')
+    setHomeworkInput(cleaned)
+    setQueuedLaunch({ prompt: cleaned, ...launch })
+    setScreen('homework')
+    setSidebarOpen(false)
   }
 
-  function handleDashboardSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function handleHomeSearchSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    openSolverWithQuery(dashboardQuery)
+    launchHomework(searchInput, { source: 'search', rewardPoints: 10, sourceLabel: searchInput.trim() || t('navHomework') })
+    setSearchInput('')
   }
 
-  function handleQuickAction(action: 'solve' | 'ask' | 'community') {
-    if (action === 'community') {
-      navigateTo('community')
-      return
-    }
+  function handleChallengeClick(challenge: ChallengeDefinition) {
+    setChallengeState((current) => ({
+      ...current,
+      [challenge.id]: { ...current[challenge.id], interacted: true },
+    }))
 
-    setPendingSolverQuery(null)
-    setSolverInput('')
-    navigateTo('solver')
+    launchHomework(challenge.prompt, {
+      source: 'challenge',
+      challengeId: challenge.id,
+      rewardPoints: challenge.points,
+      completionKey: `challenge:${challenge.id}`,
+      sourceLabel: challenge.title,
+    })
   }
-  function handleSolverSend(rawInput: string) {
+
+  function handleSubjectClick(subject: SubjectDefinition) {
+    launchHomework(subject.prompt, {
+      source: 'subject',
+      rewardPoints: 10,
+      sourceLabel: subject.title,
+    })
+  }
+
+  function sendHomeworkMessage(rawInput: string, launch?: LaunchContext) {
     const cleaned = rawInput.trim()
-    if (!cleaned || isSolverLoading) {
+
+    if (!cleaned || isLoading) {
       return
     }
 
     if (cleaned.length > 600) {
-      setSolverNotice(t('solverLongWarning'))
+      setHomeworkNotice(t('solverLongWarning'))
       return
     }
 
-    const userMessage: ChatMessage = { id: createId(), role: 'user', text: cleaned, timestamp: Date.now() }
-    const nextMessages = [...chatMessages, userMessage]
+    const userMessage: ChatMessage = {
+      id: createId(),
+      role: 'user',
+      text: cleaned,
+      timestamp: Date.now(),
+    }
 
-    setChatMessages(nextMessages)
-    setSolverInput('')
-    setSolverNotice('')
-    setIsSolverLoading(true)
+    const nextMessages = [...messages, userMessage]
+    setMessages(nextMessages)
+    setHomeworkInput('')
+    setHomeworkNotice('')
+    setIsLoading(true)
 
     const responseLanguage = detectInputLanguage(cleaned, language)
-    const waitTime = 1000 + Math.floor(Math.random() * 900)
 
     window.setTimeout(() => {
-      const generated = generateAiResponse(cleaned, responseLanguage, nextMessages)
+      const aiResult = generateAiResponse(cleaned, responseLanguage, nextMessages, t)
       const assistantMessage: ChatMessage = {
         id: createId(),
         role: 'assistant',
-        text: generated.text,
+        text: aiResult,
         timestamp: Date.now(),
       }
 
-      setChatMessages((current) => [...current, assistantMessage])
-      setIsSolverLoading(false)
+      setMessages((current) => [...current, assistantMessage])
+      setIsLoading(false)
+      recordCompletion(cleaned, userMessage.id, launch)
+    }, 1000 + Math.floor(Math.random() * 800))
+  }
 
-      if (generated.completed) {
-        setCompletedHomework((current) => [
-          { id: createId(), question: cleaned, summary: generated.summary, completedAt: Date.now() },
-          ...current,
-        ])
+  function recordCompletion(question: string, messageId: string, launch?: LaunchContext) {
+    const completionKey = launch?.completionKey ?? `message:${messageId}`
+
+    setCompletedItems((current) => {
+      if (current.some((item) => item.completionKey === completionKey)) {
+        return current
       }
-    }, waitTime)
-  }
 
-  function handleCommunitySubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const cleaned = communityInput.trim()
-    if (!cleaned) {
-      setCommunityNotice(t('communityValidation'))
-      return
+      return [
+        {
+          id: createId(),
+          completionKey,
+          question,
+          completedAt: Date.now(),
+          dayKey: dayKey(Date.now()),
+          points: launch?.rewardPoints ?? 10,
+          summary: question,
+          sourceLabel: launch?.sourceLabel ?? question,
+        },
+        ...current,
+      ]
+    })
+
+    if (launch?.source === 'challenge' && launch.challengeId) {
+      setChallengeState((current) => ({
+        ...current,
+        [launch.challengeId as ChallengeId]: {
+          ...current[launch.challengeId as ChallengeId],
+          interacted: true,
+          completed: true,
+        },
+      }))
     }
-
-    const nextPost: CommunityPost = { id: createId(), question: cleaned, timestamp: Date.now(), answers: [] }
-    setCommunityPosts((current) => [nextPost, ...current])
-    setExpandedPosts((current) => ({ ...current, [nextPost.id]: true }))
-    setCommunityInput('')
-    setCommunityNotice('')
   }
 
-  function handleAnswerSubmit(postId: string) {
-    const cleaned = (answerDrafts[postId] ?? '').trim()
-    if (!cleaned) {
-      setAnswerNotices((current) => ({ ...current, [postId]: t('answerValidation') }))
-      return
-    }
-
-    setCommunityPosts((current) =>
-      current.map((post) =>
-        post.id === postId
-          ? { ...post, answers: [...post.answers, { id: createId(), text: cleaned, timestamp: Date.now() }] }
-          : post,
-      ),
-    )
-    setExpandedPosts((current) => ({ ...current, [postId]: true }))
-    setAnswerDrafts((current) => ({ ...current, [postId]: '' }))
-    setAnswerNotices((current) => ({ ...current, [postId]: '' }))
+  function saveProfile() {
+    setUsername(profileName.trim())
   }
 
-  function handleSaveProfile(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const cleaned = settingsNameDraft.trim()
-    if (!cleaned) {
-      setSettingsNotice(t('usernameValidation'))
-      return
-    }
-
-    setUsername(cleaned)
-    setSettingsNotice(t('settingsSaved'))
+  function clearProgress() {
+    setCompletedItems([])
+    setChallengeState(initialChallengeState)
   }
 
-  function handleClearChatHistory() {
-    setChatMessages((current) => current.filter((message) => message.role === 'user'))
-    setIsSolverLoading(false)
-    setSettingsNotice(t('chatCleared'))
-  }
-
-  function handleClearRecentSearches() {
+  function clearSearches() {
     setRecentSearches([])
-    setSettingsNotice(t('searchesCleared'))
   }
 
-  function handleClearProgress() {
-    setCompletedHomework([])
-    setSettingsNotice(t('progressCleared'))
-  }
+  const navigation = [
+    { id: 'home' as const, label: t('navHome'), icon: Home },
+    { id: 'homework' as const, label: t('navHomework'), icon: BookOpenText },
+    { id: 'challenges' as const, label: t('navChallenges'), icon: Trophy },
+    { id: 'progress' as const, label: t('navProgress'), icon: ChartNoAxesColumn },
+    { id: 'profile' as const, label: t('navProfile'), icon: UserRound },
+  ]
 
   return (
-    <div className="shell">
+    <div className="stepwise-shell">
       <button
         type="button"
-        className={`overlay ${sidebarOpen ? 'overlay--visible' : ''}`}
+        className={`stepwise-overlay ${sidebarOpen ? 'stepwise-overlay--visible' : ''}`}
         aria-label="Close navigation"
         onClick={() => setSidebarOpen(false)}
       />
 
-      <div className="app-layout">
-        <aside className={`sidebar ${sidebarOpen ? 'sidebar--open' : ''}`}>
-          <div className="sidebar__brand">
-            <div className="brand-badge">
-              <BrainCircuit size={20} />
-            </div>
+      <div className="stepwise-frame">
+        <aside className={`stepwise-sidebar ${sidebarOpen ? 'stepwise-sidebar--open' : ''}`}>
+          <div className="brand-panel">
+            <div className="brand-mark">✨</div>
             <div>
               <strong>{t('brand')}</strong>
-              <p>{t('activeNow')}</p>
+              <p>{t('tagline')}</p>
             </div>
-            <button type="button" className="sidebar__close" onClick={() => setSidebarOpen(false)}>
-              <X size={18} />
+            <button type="button" className="sidebar-close" onClick={() => setSidebarOpen(false)}>
+              <X size={16} />
             </button>
           </div>
 
-          <nav className="sidebar__nav" aria-label="Primary navigation">
-            {navigationItems.map((item) => (
-              <NavButton
+          <div className="user-panel">
+            <div className="avatar-pill">{displayName.slice(0, 1).toUpperCase()}</div>
+            <div className="user-panel__info">
+              <strong>{displayName}</strong>
+              <p>⭐ {interpolate(t('problemsSolved'), { count: totalSolved })}</p>
+            </div>
+            <span className="user-notice">{unseenCount}</span>
+          </div>
+
+          <nav className="stepwise-nav" aria-label="Sidebar navigation">
+            {navigation.map((item) => (
+              <SidebarButton
                 key={item.id}
                 icon={item.icon}
                 label={item.label}
-                active={activeScreen === item.id}
-                onClick={() => navigateTo(item.id)}
+                active={screen === item.id}
+                onClick={() => openScreen(item.id)}
               />
             ))}
           </nav>
 
-          <div className="sidebar__meta card">
-            <div>
-              <p className="eyebrow">{t('preferredLanguage')}</p>
-              <strong>{languageLabel(language, t)}</strong>
-            </div>
-            <div className="chip-row">
-              <span className="chip">
-                <Languages size={14} /> {language.toUpperCase()}
-              </span>
-              <span className="chip">
-                {theme === 'dark' ? <MoonStar size={14} /> : <SunMedium size={14} />} {theme}
-              </span>
-            </div>
+          <div className="sidebar-footer">
+            <p>StepWise v2.1.0</p>
+            <strong>{t('poweredBy')}</strong>
           </div>
         </aside>
 
-        <main className="main-content">
-          <header className="topbar card">
-            <div className="topbar__left">
-              <button type="button" className="menu-button" onClick={() => setSidebarOpen(true)}>
-                <Menu size={20} />
-              </button>
-              <div>
-                <p className="eyebrow">{screenLabel(activeScreen, t)}</p>
-                <h1>{interpolate(t('welcomeBack'), { name: username })}</h1>
-              </div>
-            </div>
-            <div className="topbar__actions">
-              <button type="button" className="topbar-chip" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-                {theme === 'dark' ? <SunMedium size={16} /> : <MoonStar size={16} />}
-                <span>{theme === 'dark' ? t('lightMode') : t('darkMode')}</span>
-              </button>
-              <div className="topbar-chip">
-                <Languages size={16} />
-                <span>{languageLabel(language, t)}</span>
-              </div>
-            </div>
-          </header>
-          {activeScreen === 'dashboard' && (
-            <section className="screen-grid screen-grid--dashboard">
-              <div className="hero card hero-card-web">
-                <div className="hero-card-web__content">
-                  <p className="eyebrow">{t('dashboardLabel')}</p>
-                  <h2>{t('dashboardTitle')}</h2>
-                  <p>{t('dashboardSubtitle')}</p>
-                  <form className="search-panel" onSubmit={handleDashboardSubmit}>
-                    <div className="search-input-wrap">
-                      <Search size={18} />
-                      <input
-                        value={dashboardQuery}
-                        onChange={(event) => setDashboardQuery(event.target.value)}
-                        placeholder={t('searchPlaceholder')}
-                        aria-label={t('searchPlaceholder')}
-                      />
-                    </div>
-                    <button type="submit">{t('searchButton')}</button>
-                  </form>
-                  <p className={`inline-notice ${dashboardNotice ? 'inline-notice--error' : ''}`}>
-                    {dashboardNotice || t('searchHint')}
-                  </p>
-                </div>
-                <div className="preview-stack">
-                  {screenPreviewImages.slice(0, 3).map((image, index) => (
-                    <img key={image} src={image} alt={`preview-${index + 1}`} className={`preview-card preview-card--${index + 1}`} />
-                  ))}
-                </div>
-              </div>
+        <main className="stepwise-main">
+          <button type="button" className="mobile-menu" onClick={() => setSidebarOpen(true)}>
+            <Menu size={18} />
+          </button>
 
-              <div className="quick-actions card">
-                <div className="section-header">
+          {screen === 'home' && (
+            <section className="home-screen">
+              <header className="home-hero">
+                <h1>{interpolate(t('greeting'), { name: displayName })}</h1>
+                <p className={`home-hero__subtitle ${homeNotice ? 'home-hero__subtitle--error' : ''}`}>
+                  {homeNotice || t('subtitle')}
+                </p>
+                <form className="search-bar" onSubmit={handleHomeSearchSubmit}>
+                  <Search size={18} />
+                  <input
+                    value={searchInput}
+                    onChange={(event) => setSearchInput(event.target.value)}
+                    placeholder={t('searchPlaceholder')}
+                    aria-label={t('searchPlaceholder')}
+                  />
+                  <button type="submit" className="visually-hidden">{t('send')}</button>
+                </form>
+              </header>
+
+              <section className="step-card panel-card">
+                <div className="panel-heading panel-heading--start">
+                  <span className="panel-dot">✨</span>
                   <div>
-                    <p className="eyebrow">{t('quickActions')}</p>
-                    <h3>{t('quickActions')}</h3>
+                    <h2>{t('howItWorks')}</h2>
+                    <p>{t('howItWorksSub')}</p>
                   </div>
                 </div>
-                <div className="action-grid">
-                  <ActionButton icon={BookOpenText} title={t('solveHomework')} onClick={() => handleQuickAction('solve')} />
-                  <ActionButton icon={Sparkles} title={t('askAI')} onClick={() => handleQuickAction('ask')} />
-                  <ActionButton icon={Users} title={t('communityAction')} onClick={() => handleQuickAction('community')} />
+                <div className="step-grid">
+                  <StepCard emoji="💬" number="1" label={t('stepAsk')} />
+                  <StepCard emoji="🧠" number="2" label={t('stepLearn')} />
+                  <StepCard emoji="✨" number="3" label={t('stepSolve')} />
                 </div>
+                <button type="button" className="try-button" onClick={() => launchHomework('Help me solve a homework problem step by step.', { source: 'quick-action', rewardPoints: 10, sourceLabel: t('tryNow') })}>
+                  <span>⊕</span> {t('tryNow')}
+                </button>
+              </section>
+
+              <section className="progress-card panel-card">
+                <div className="panel-heading panel-heading--center">📊 {t('progressTitle')}</div>
+                <div className="progress-stats-grid">
+                  <StatTile value={String(streak)} label={`${t('streak')} 🔥`} tone="purple" />
+                  <StatTile value={String(todaySolved)} label={`${t('today')} 🛰`} tone="blue" />
+                  <StatTile value={String(totalSolved)} label={`${t('total')} ⭐`} tone="green" />
+                </div>
+                <div className="goal-row">
+                  <span>{interpolate(t('dailyGoal'), { count: DAILY_GOAL })}</span>
+                  <strong>{Math.min(todaySolved, DAILY_GOAL)}/{DAILY_GOAL}</strong>
+                </div>
+                <div className="goal-track">
+                  <div className="goal-track__fill" style={{ width: `${progressPercent}%` }} />
+                </div>
+              </section>
+
+              <div className="section-heading">
+                <h2>🎯 {t('challenges')}</h2>
+                {unseenCount > 0 ? <span className="count-pill">{interpolate(t('newCount'), { count: unseenCount })}</span> : null}
               </div>
 
-              <div className="stats-grid">
-                <StatCard label={t('completedCount')} value={String(completedHomework.length)} />
-                <StatCard label={t('communityQuestions')} value={String(communityPosts.length)} />
-                <StatCard label={t('preferredLanguage')} value={languageLabel(language, t)} />
+              <div className="challenge-list">
+                {challenges.map((challenge) => (
+                  <ChallengeCard
+                    key={challenge.id}
+                    challenge={challenge}
+                    showNew={challenge.startsNew && !challengeState[challenge.id].interacted}
+                    onClick={() => handleChallengeClick(challenge)}
+                  />
+                ))}
               </div>
 
-              <div className="card recent-card">
-                <div className="section-header">
+              <div className="section-heading section-heading--compact">
+                <h2>🏆 {t('leaderboard')}</h2>
+                <button type="button" className="link-button">{t('viewAll')} ›</button>
+              </div>
+
+              <div className="leaderboard-card">
+                <div className="leaderboard-user">
+                  <span className="leaderboard-avatar">{displayName.slice(0, 1).toUpperCase()}</span>
                   <div>
-                    <p className="eyebrow">{t('recentSearches')}</p>
-                    <h3>{t('recentSearches')}</h3>
+                    <strong>{displayName} {t('you')}</strong>
+                    <p>{totalPoints} {t('points')}</p>
                   </div>
                 </div>
-                {recentSearches.length === 0 ? (
-                  <p className="empty-state">{t('noRecentActivity')}</p>
-                ) : (
-                  <div className="stack-list">
-                    {recentSearches.map((entry) => (
-                      <button key={entry.id} type="button" className="list-item-button" onClick={() => openSolverWithQuery(entry.query)}>
-                        <div>
-                          <strong>{entry.query}</strong>
-                          <span>{formatTimestamp(entry.timestamp, language)}</span>
-                        </div>
-                        <ChevronRight size={18} />
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <span className="leaderboard-rank">#1</span>
               </div>
 
-              <div className="card insight-card-web">
-                <div className="section-header">
-                  <div>
-                    <p className="eyebrow">{t('designMatched')}</p>
-                    <h3>{t('designMatched')}</h3>
-                  </div>
-                </div>
-                <p>{t('designMatchedText')}</p>
-                <div className="inline-actions">
-                  <button type="button" className="secondary-button" onClick={() => navigateTo('solver')}>
-                    {t('goToSolver')}
-                  </button>
-                  <button type="button" className="secondary-button" onClick={() => navigateTo('community')}>
-                    {t('goToCommunity')}
-                  </button>
-                  <button type="button" className="secondary-button" onClick={() => navigateTo('progress')}>
-                    {t('viewProgress')}
-                  </button>
-                </div>
+              <div className="section-heading section-heading--compact">
+                <h2>🎨 {t('subjects')}</h2>
+              </div>
+
+              <div className="subjects-grid">
+                {subjects.map((subject) => (
+                  <SubjectCard key={subject.id} subject={subject} onClick={() => handleSubjectClick(subject)} />
+                ))}
               </div>
             </section>
           )}
 
-          {activeScreen === 'solver' && (
-            <section className="screen-grid screen-grid--solver">
-              <div className="card screen-heading-card">
-                <p className="eyebrow">{t('solverLabel')}</p>
-                <h2>{t('solverTitle')}</h2>
-                <p>{t('solverSubtitle')}</p>
-              </div>
-              <div className="card tips-card">
-                <div className="section-header">
-                  <h3>{t('solverTipsTitle')}</h3>
+          {screen === 'homework' && (
+            <section className="subpage-screen">
+              <header className="subpage-header panel-card">
+                <div>
+                  <p>{t('welcomeHomework')}</p>
+                  <h1>{t('homeworkTitle')}</h1>
+                  <span>{t('homeworkSubtitle')}</span>
                 </div>
-                <ul className="tips-list">
-                  <li>{t('solverTipOne')}</li>
-                  <li>{t('solverTipTwo')}</li>
-                  <li>{t('solverTipThree')}</li>
-                </ul>
-              </div>
-              <div className="card chat-card">
-                <div className="chat-thread">
-                  {chatMessages.length === 0 && !isSolverLoading ? <div className="assistant-placeholder">{t('solverEmptyState')}</div> : null}
-                  {chatMessages.map((message) => (
-                    <article key={message.id} className={`message message--${message.role}`}>
-                      <div className="message__meta">
-                        <span>{message.role === 'user' ? username : t('brand')}</span>
-                        <time>{formatShortTime(message.timestamp, language)}</time>
+              </header>
+
+              <section className="homework-chat panel-card">
+                <div className="chat-stream">
+                  {messages.length === 0 && !isLoading ? <div className="chat-empty">{t('solverEmpty')}</div> : null}
+                  {messages.map((message) => (
+                    <article key={message.id} className={`chat-bubble chat-bubble--${message.role}`}>
+                      <div className="chat-bubble__meta">
+                        <strong>{message.role === 'user' ? displayName : t('brand')}</strong>
+                        <span>{formatShortTime(message.timestamp, language)}</span>
                       </div>
                       <p>{message.text}</p>
                     </article>
                   ))}
-                  {isSolverLoading ? (
-                    <article className="message message--assistant message--loading">
-                      <div className="message__meta">
-                        <span>{t('brand')}</span>
-                      </div>
-                      <div className="loading-dots" aria-label={t('solverThinking')}>
-                        <span />
-                        <span />
-                        <span />
-                      </div>
-                      <p>{t('solverThinking')}</p>
+                  {isLoading ? (
+                    <article className="chat-bubble chat-bubble--assistant chat-bubble--loading">
+                      <div className="loading-dots"><span /><span /><span /></div>
+                      <p>{t('solverLoading')}</p>
                     </article>
                   ) : null}
-                  <div ref={chatEndRef} />
+                  <div ref={messagesEndRef} />
                 </div>
-                <form className="chat-form" onSubmit={(event) => {
-                  event.preventDefault()
-                  handleSolverSend(solverInput)
-                }}>
-                  <textarea
-                    value={solverInput}
-                    onChange={(event) => setSolverInput(event.target.value)}
-                    placeholder={t('solverInputPlaceholder')}
-                    rows={3}
-                    aria-label={t('solverInputPlaceholder')}
-                  />
-                  <div className="chat-form__footer">
-                    <p className={`inline-notice ${solverNotice ? 'inline-notice--error' : ''}`}>{solverNotice}</p>
-                    <button type="submit" disabled={isSolverLoading}>
-                      <SendHorizontal size={16} /> {t('sendMessage')}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </section>
-          )}
 
-          {activeScreen === 'community' && (
-            <section className="screen-grid screen-grid--community">
-              <div className="card screen-heading-card">
-                <p className="eyebrow">{t('communityLabel')}</p>
-                <h2>{t('communityTitle')}</h2>
-                <p>{t('communitySubtitle')}</p>
-              </div>
-              <div className="card community-form-card">
-                <form onSubmit={handleCommunitySubmit} className="community-form">
+                <form
+                  className="homework-form"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    sendHomeworkMessage(homeworkInput)
+                  }}
+                >
                   <textarea
-                    value={communityInput}
-                    onChange={(event) => setCommunityInput(event.target.value)}
-                    placeholder={t('communityPlaceholder')}
+                    value={homeworkInput}
+                    onChange={(event) => setHomeworkInput(event.target.value)}
+                    placeholder={t('homeworkPlaceholder')}
                     rows={4}
-                    aria-label={t('communityPlaceholder')}
+                    aria-label={t('homeworkPlaceholder')}
                   />
-                  <div className="chat-form__footer">
-                    <p className={`inline-notice ${communityNotice ? 'inline-notice--error' : ''}`}>{communityNotice}</p>
-                    <button type="submit">{t('communityPostButton')}</button>
+                  <div className="homework-form__footer">
+                    <p className={`homework-form__notice ${homeworkNotice ? 'homework-form__notice--error' : ''}`}>{homeworkNotice}</p>
+                    <button type="submit" className="solid-button">{t('send')}</button>
                   </div>
                 </form>
-              </div>
-              <div className="card feed-card">
-                <div className="section-header">
-                  <h3>{t('communityQuestions')}</h3>
-                </div>
-                {sortedPosts.length === 0 ? (
-                  <p className="empty-state">{t('communityNoPosts')}</p>
-                ) : (
-                  <div className="post-list">
-                    {sortedPosts.map((post) => {
-                      const isExpanded = expandedPosts[post.id] ?? false
-                      return (
-                        <article key={post.id} className="post-card">
-                          <button
-                            type="button"
-                            className="post-card__toggle"
-                            onClick={() => setExpandedPosts((current) => ({ ...current, [post.id]: !isExpanded }))}
-                          >
-                            <div>
-                              <strong>{post.question}</strong>
-                              <span>{t('postedAt')} {formatTimestamp(post.timestamp, language)}</span>
-                            </div>
-                            <span>{isExpanded ? t('collapse') : t('expand')}</span>
-                          </button>
-                          {isExpanded ? (
-                            <div className="post-card__body">
-                              <div className="section-header section-header--compact">
-                                <h4>{t('communityAnswers')} ({post.answers.length})</h4>
-                              </div>
-                              {post.answers.length === 0 ? (
-                                <p className="empty-state empty-state--inline">{t('communityNoAnswers')}</p>
-                              ) : (
-                                <div className="answer-list">
-                                  {post.answers.map((answer) => (
-                                    <div key={answer.id} className="answer-card">
-                                      <p>{answer.text}</p>
-                                      <span>{formatTimestamp(answer.timestamp, language)}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                              <div className="answer-form">
-                                <textarea
-                                  value={answerDrafts[post.id] ?? ''}
-                                  onChange={(event) => setAnswerDrafts((current) => ({ ...current, [post.id]: event.target.value }))}
-                                  placeholder={t('answerPlaceholder')}
-                                  rows={3}
-                                  aria-label={t('answerPlaceholder')}
-                                />
-                                <div className="chat-form__footer">
-                                  <p className={`inline-notice ${answerNotices[post.id] ? 'inline-notice--error' : ''}`}>{answerNotices[post.id] ?? ''}</p>
-                                  <button type="button" onClick={() => handleAnswerSubmit(post.id)}>
-                                    {t('addAnswer')}
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          ) : null}
-                        </article>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
-          {activeScreen === 'progress' && (
-            <section className="screen-grid screen-grid--progress">
-              <div className="card screen-heading-card">
-                <p className="eyebrow">{t('progressLabel')}</p>
-                <h2>{t('progressTitle')}</h2>
-                <p>{t('progressSubtitle')}</p>
-              </div>
-              <div className="stats-grid">
-                <StatCard label={t('progressTotal')} value={String(completedHomework.length)} />
-                <StatCard label={t('recentSearches')} value={String(recentSearches.length)} />
-                <StatCard label={t('communityQuestions')} value={String(communityPosts.length)} />
-              </div>
-              <div className="card progress-list-card">
-                <div className="section-header">
-                  <h3>{t('progressLatest')}</h3>
-                </div>
-                {completedHomework.length === 0 ? (
-                  <p className="empty-state">{t('progressEmpty')}</p>
-                ) : (
-                  <div className="stack-list">
-                    {completedHomework.map((item) => (
-                      <article key={item.id} className="progress-item">
-                        <div>
-                          <strong>{item.question}</strong>
-                          <p>{item.summary}</p>
-                        </div>
-                        <span>{t('completedOn')} {formatTimestamp(item.completedAt, language)}</span>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </div>
+              </section>
             </section>
           )}
 
-          {activeScreen === 'settings' && (
-            <section className="screen-grid screen-grid--settings">
-              <div className="card screen-heading-card">
-                <p className="eyebrow">{t('settingsLabel')}</p>
-                <h2>{t('settingsTitle')}</h2>
-                <p>{t('settingsSubtitle')}</p>
+          {screen === 'challenges' && (
+            <section className="subpage-screen">
+              <header className="subpage-header panel-card">
+                <div>
+                  <p>{t('welcomeChallenges')}</p>
+                  <h1>{t('challenges')}</h1>
+                  <span>{t('challengesSubtitle')}</span>
+                </div>
+              </header>
+              <section className="challenge-list">
+                {challenges.map((challenge) => (
+                  <ChallengeCard
+                    key={challenge.id}
+                    challenge={challenge}
+                    showNew={challenge.startsNew && !challengeState[challenge.id].interacted}
+                    onClick={() => handleChallengeClick(challenge)}
+                  />
+                ))}
+              </section>
+            </section>
+          )}
+
+          {screen === 'progress' && (
+            <section className="subpage-screen">
+              <header className="subpage-header panel-card">
+                <div>
+                  <p>{t('welcomeProgress')}</p>
+                  <h1>{t('progressTitle')}</h1>
+                  <span>{t('progressPageTitle')}</span>
+                </div>
+              </header>
+
+              <div className="progress-summary-grid">
+                <StatTile value={String(streak)} label={`${t('streak')} 🔥`} tone="purple" />
+                <StatTile value={String(todaySolved)} label={`${t('today')} 🛰`} tone="blue" />
+                <StatTile value={String(totalSolved)} label={`${t('total')} ⭐`} tone="green" />
               </div>
-              <div className="settings-grid">
-                <div className="card settings-card">
-                  <div className="section-header">
-                    <h3>{t('profileSection')}</h3>
-                  </div>
-                  <form className="settings-form" onSubmit={handleSaveProfile}>
-                    <label>
-                      <span>{t('usernameLabel')}</span>
-                      <input
-                        value={settingsNameDraft}
-                        onChange={(event) => setSettingsNameDraft(event.target.value)}
-                        placeholder={t('usernamePlaceholder')}
-                      />
-                    </label>
-                    <button type="submit">{t('saveProfile')}</button>
-                  </form>
+
+              <section className="panel-card history-panel">
+                {completedItems.length === 0 ? (
+                  <div className="empty-history">{t('progressEmpty')}</div>
+                ) : (
+                  completedItems.map((item) => (
+                    <article key={item.id} className="history-item">
+                      <div>
+                        <strong>{item.sourceLabel}</strong>
+                        <p>{item.question}</p>
+                      </div>
+                      <span>{t('completedOn')} {formatDateTime(item.completedAt, language)}</span>
+                    </article>
+                  ))
+                )}
+              </section>
+            </section>
+          )}
+
+          {screen === 'profile' && (
+            <section className="subpage-screen">
+              <header className="subpage-header panel-card">
+                <div>
+                  <p>{t('welcomeProfile')}</p>
+                  <h1>{t('profileTitle')}</h1>
+                  <span>{t('profileSubtitle')}</span>
                 </div>
-                <div className="card settings-card">
-                  <div className="section-header">
-                    <h3>{t('appearanceSection')}</h3>
-                  </div>
-                  <div className="segmented-control">
-                    <button type="button" className={theme === 'light' ? 'active' : ''} onClick={() => setTheme('light')}>
-                      <SunMedium size={16} /> {t('lightMode')}
-                    </button>
-                    <button type="button" className={theme === 'dark' ? 'active' : ''} onClick={() => setTheme('dark')}>
-                      <MoonStar size={16} /> {t('darkMode')}
-                    </button>
-                  </div>
-                </div>
-                <div className="card settings-card">
-                  <div className="section-header">
-                    <h3>{t('languageSection')}</h3>
-                  </div>
-                  <label className="select-field">
+              </header>
+
+              <div className="profile-grid">
+                <section className="panel-card settings-panel">
+                  <label>
+                    <span>{t('usernameLabel')}</span>
+                    <input
+                      value={profileName}
+                      onChange={(event) => setProfileName(event.target.value)}
+                      placeholder={t('usernamePlaceholder')}
+                    />
+                  </label>
+                  <button type="button" className="solid-button" onClick={saveProfile}>{t('saveProfile')}</button>
+                </section>
+
+                <section className="panel-card settings-panel">
+                  <label>
                     <span>{t('languageLabel')}</span>
                     <select value={language} onChange={(event) => setLanguage(event.target.value as Language)}>
-                      <option value="en">{t('languageEnglish')}</option>
-                      <option value="es">{t('languageSpanish')}</option>
-                      <option value="fr">{t('languageFrench')}</option>
+                      <option value="en">{t('english')}</option>
+                      <option value="es">{t('spanish')}</option>
+                      <option value="fr">{t('french')}</option>
                     </select>
                   </label>
-                </div>
-                <div className="card settings-card">
-                  <div className="section-header">
-                    <h3>{t('dataControls')}</h3>
-                  </div>
-                  <div className="danger-list">
-                    <button type="button" className="danger-button" onClick={handleClearChatHistory}>
-                      <Trash2 size={16} /> {t('clearChatHistory')}
+                  <div className="theme-toggle-row">
+                    <button type="button" className={`theme-toggle ${theme === 'dark' ? 'theme-toggle--active' : ''}`} onClick={() => setTheme('dark')}>
+                      <MoonStar size={16} /> {t('dark')}
                     </button>
-                    <button type="button" className="danger-button" onClick={handleClearRecentSearches}>
-                      <Trash2 size={16} /> {t('clearRecentSearches')}
-                    </button>
-                    <button type="button" className="danger-button" onClick={handleClearProgress}>
-                      <Trash2 size={16} /> {t('clearProgress')}
+                    <button type="button" className={`theme-toggle ${theme === 'light' ? 'theme-toggle--active' : ''}`} onClick={() => setTheme('light')}>
+                      <SunMedium size={16} /> {t('light')}
                     </button>
                   </div>
-                </div>
+                </section>
+
+                <section className="panel-card settings-panel settings-panel--wide">
+                  <div className="profile-actions">
+                    <button type="button" className="ghost-button" onClick={clearSearches}>{t('clearSearches')}</button>
+                    <button type="button" className="ghost-button" onClick={clearProgress}>{t('clearProgress')}</button>
+                  </div>
+                  <div>
+                    <h2>{t('recentSearches')}</h2>
+                    {recentSearches.length === 0 ? (
+                      <p className="recent-empty">{t('noRecentSearches')}</p>
+                    ) : (
+                      <div className="recent-search-list">
+                        {recentSearches.map((entry) => (
+                          <button key={entry.id} type="button" className="recent-search-item" onClick={() => launchHomework(entry.query, { source: 'search', rewardPoints: 10, sourceLabel: entry.query })}>
+                            <span>{entry.query}</span>
+                            <strong>{formatShortTime(entry.timestamp, language)}</strong>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
               </div>
-              <p className={`inline-notice ${settingsNotice ? '' : 'inline-notice--muted'}`}>{settingsNotice}</p>
             </section>
           )}
         </main>
       </div>
-
-      <nav className="mobile-nav" aria-label="Mobile navigation">
-        {navigationItems.map((item) => (
-          <button key={item.id} type="button" className={activeScreen === item.id ? 'active' : ''} onClick={() => navigateTo(item.id)}>
-            <item.icon size={18} />
-            <span>{item.label}</span>
-          </button>
-        ))}
-      </nav>
     </div>
   )
 }
 
-function NavButton({ icon: Icon, label, active, onClick }: { icon: LucideIcon; label: string; active: boolean; onClick: () => void }) {
+function SidebarButton({ icon: Icon, label, active, onClick }: { icon: LucideIcon; label: string; active: boolean; onClick: () => void }) {
   return (
-    <button type="button" className={`nav-button ${active ? 'nav-button--active' : ''}`} onClick={onClick}>
-      <Icon size={18} />
+    <button type="button" className={`sidebar-button ${active ? 'sidebar-button--active' : ''}`} onClick={onClick}>
+      <span className="sidebar-button__icon"><Icon size={16} /></span>
       <span>{label}</span>
+      {active ? <span className="sidebar-button__dot" /> : null}
     </button>
   )
 }
 
-function ActionButton({ icon: Icon, title, onClick }: { icon: LucideIcon; title: string; onClick: () => void }) {
+function StepCard({ emoji, number, label }: { emoji: string; number: string; label: string }) {
   return (
-    <button type="button" className="action-button" onClick={onClick}>
-      <Icon size={18} />
-      <span>{title}</span>
-    </button>
+    <div className="mini-step-card">
+      <div className="mini-step-card__emoji">{emoji}</div>
+      <strong>{number}</strong>
+      <span>{label}</span>
+    </div>
   )
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatTile({ value, label, tone }: { value: string; label: string; tone: 'purple' | 'blue' | 'green' }) {
   return (
-    <article className="card stat-card-web">
-      <p>{label}</p>
+    <article className={`stat-tile stat-tile--${tone}`}>
       <strong>{value}</strong>
+      <span>{label}</span>
     </article>
+  )
+}
+
+function ChallengeCard({ challenge, showNew, onClick }: { challenge: ChallengeDefinition; showNew: boolean; onClick: () => void }) {
+  return (
+    <button type="button" className="challenge-card" onClick={onClick}>
+      <span className={`challenge-card__icon challenge-card__icon--${challenge.tone}`}>{challenge.icon}</span>
+      <div className="challenge-card__body">
+        <div className="challenge-card__topline">
+          <strong>{challenge.title}</strong>
+          <div className="challenge-card__side">
+            {showNew ? <span className="new-badge">NEW</span> : null}
+            {challenge.showChevron ? <ChevronRight size={16} className="challenge-arrow" /> : null}
+          </div>
+        </div>
+        <p>{challenge.description}</p>
+        <div className="challenge-tags">
+          <span className={`difficulty-badge difficulty-badge--${challenge.tone}`}>{challenge.difficulty}</span>
+          <span className="points-badge">+{challenge.points}</span>
+        </div>
+      </div>
+    </button>
+  )
+}
+
+function SubjectCard({ subject, onClick }: { subject: SubjectDefinition; onClick: () => void }) {
+  return (
+    <button type="button" className={`subject-card subject-card--${subject.tone}`} onClick={onClick}>
+      <span>{subject.icon}</span>
+      <strong>{subject.title}</strong>
+    </button>
   )
 }
 
@@ -1182,7 +1102,7 @@ function useLocalStorageState<T>(key: string, initialValue: T) {
     try {
       window.localStorage.setItem(key, JSON.stringify(value))
     } catch {
-      // Ignore storage write failures so the app still works in restricted environments.
+      // Ignore storage write failures.
     }
   }, [key, value])
 
@@ -1195,37 +1115,41 @@ function useTranslator(language: Language): Translate {
     return interpolate(String(template), variables)
   }
 }
+
 function interpolate(template: string, variables: Record<string, string | number>) {
-  return Object.entries(variables).reduce(
-    (text, [key, value]) => text.split(`{${key}}`).join(String(value)),
-    template,
-  )
-}
-
-function screenLabel(screen: Screen, t: Translate) {
-  if (screen === 'dashboard') return t('navDashboard')
-  if (screen === 'solver') return t('navSolver')
-  if (screen === 'community') return t('navCommunity')
-  if (screen === 'progress') return t('navProgress')
-  return t('navSettings')
-}
-
-function languageLabel(language: Language, t: Translate) {
-  if (language === 'es') return t('languageSpanish')
-  if (language === 'fr') return t('languageFrench')
-  return t('languageEnglish')
+  return Object.entries(variables).reduce((current, [key, value]) => current.split(`{${key}}`).join(String(value)), template)
 }
 
 function createId() {
-  return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
+  return `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 }
 
-function formatTimestamp(timestamp: number, language: Language) {
-  return new Intl.DateTimeFormat(localeForLanguage(language), { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp)
+function dayKey(timestamp: number) {
+  const date = new Date(timestamp)
+  date.setHours(0, 0, 0, 0)
+  return date.toISOString()
+}
+
+function calculateStreak(entries: CompletionEntry[]) {
+  const solvedDays = new Set(entries.map((entry) => entry.dayKey))
+  const cursor = new Date()
+  cursor.setHours(0, 0, 0, 0)
+  let streak = 0
+
+  while (solvedDays.has(cursor.toISOString())) {
+    streak += 1
+    cursor.setDate(cursor.getDate() - 1)
+  }
+
+  return streak
 }
 
 function formatShortTime(timestamp: number, language: Language) {
   return new Intl.DateTimeFormat(localeForLanguage(language), { hour: 'numeric', minute: '2-digit' }).format(timestamp)
+}
+
+function formatDateTime(timestamp: number, language: Language) {
+  return new Intl.DateTimeFormat(localeForLanguage(language), { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp)
 }
 
 function localeForLanguage(language: Language) {
@@ -1236,54 +1160,50 @@ function localeForLanguage(language: Language) {
 
 function detectInputLanguage(input: string, fallback: Language): Language {
   const normalized = input.toLowerCase()
-  if (/[¿¡]|\b(porque|resolver|deberes|ecuacion|pregunta|tarea|explica)\b/i.test(normalized)) return 'es'
-  if (/[àâçéèêëîïôûùüÿœ]|\b(pourquoi|devoir|question|reponse|explique|equation)\b/i.test(normalized)) return 'fr'
+  if (/[¿¡]|\b(tarea|resolver|ecuacion|pregunta|explica|fraccion)\b/i.test(normalized)) return 'es'
+  if (/[àâçéèêëîïôûùüÿœ]|\b(devoir|question|explique|equation|fraction)\b/i.test(normalized)) return 'fr'
   return fallback
 }
 
-function generateAiResponse(input: string, language: Language, history: ChatMessage[]) {
+function generateAiResponse(input: string, language: Language, history: ChatMessage[], t: Translate) {
   const phrases = responsePhrases[language]
-  const trimmed = input.trim()
-  const normalized = trimmed.toLowerCase()
-  const words = trimmed.split(/\s+/).filter(Boolean)
-  const previousUserMessage = [...history].reverse().find((message) => message.role === 'user' && message.text !== trimmed)
-  const followUpContext = previousUserMessage ? `${phrases.followUpPrefix} ${previousUserMessage.text}` : ''
-  const isUnclear = words.length < 4 || trimmed.length < 12
-  const looksTechnical = /(solve|equation|fraction|calculate|integral|derivative|triangle|velocity|force|energy|mass|cell|photosynthesis|atom|molecule|graph|algebra|geometry|physics|chemistry|biology|math|science|résoudre|ecuacion|fuerza|energia|fraccion|derivada|algèbre|géométrie)/i.test(normalized)
+  const normalized = input.toLowerCase()
+  const words = input.trim().split(/\s+/).filter(Boolean)
+  const previousUserMessage = [...history].reverse().find((message) => message.role === 'user' && message.text !== input)
+  const isTechnical = /(math|science|physics|chemistry|biology|algebra|equation|fraction|force|energy|solve|calculate|triangle|graph|historia|matematicas|science|devoir)/i.test(normalized)
 
-  if (isUnclear) {
-    const text = [
-      `${phrases.explanation}:`,
-      phrases.clarificationConcept,
+  if (words.length < 4) {
+    return [
+      `${t('chatExplanation')}:`,
+      phrases.clarification,
       '',
-      `${phrases.steps}:`,
-      ...phrases.clarificationSteps.map((step, index) => `${index + 1}. ${step}`),
+      `${t('chatSteps')}:`,
+      '1. Share the full problem statement.',
+      '2. Tell me which part feels confusing.',
+      '3. I will then explain and solve it clearly.',
       '',
-      `${phrases.finalAnswer}:`,
-      phrases.clarificationFinal,
+      `${t('chatFinal')}:`,
+      phrases.clarification,
     ].join('\n')
-
-    return { text, summary: phrases.clarificationFinal, completed: false }
   }
 
-  const explanation = looksTechnical ? phrases.mathConcept : phrases.generalConcept
-  const steps = looksTechnical ? phrases.mathSteps : phrases.generalSteps
-  const finalAnswer = looksTechnical ? phrases.mathFinal : phrases.generalFinal
-  const text = [
-    `${phrases.explanation}:`,
+  const explanation = isTechnical ? phrases.mathExplanation : phrases.generalExplanation
+  const steps = isTechnical ? phrases.mathSteps : phrases.generalSteps
+  const finalAnswer = isTechnical ? phrases.finalMath : phrases.finalGeneral
+
+  return [
+    `${t('chatExplanation')}:`,
     explanation,
-    followUpContext ? `\n${followUpContext}` : '',
+    previousUserMessage ? `\n${phrases.followUp} ${previousUserMessage.text}` : '',
     '',
-    `${phrases.steps}:`,
+    `${t('chatSteps')}:`,
     ...steps.map((step, index) => `${index + 1}. ${step}`),
     '',
-    `${phrases.finalAnswer}:`,
+    `${t('chatFinal')}:`,
     finalAnswer,
   ]
     .filter(Boolean)
     .join('\n')
-
-  return { text, summary: finalAnswer, completed: true }
 }
 
 export default App
