@@ -559,7 +559,14 @@ function App() {
 
     setHomeNotice('')
     setHomeworkInput(cleaned)
-    setQueuedLaunch({ prompt: cleaned, ...launch })
+    setQueuedLaunch({
+      prompt: cleaned,
+      source: launch?.source ?? 'quick-action',
+      rewardPoints: launch?.rewardPoints,
+      completionKey: launch?.completionKey,
+      challengeId: launch?.challengeId,
+      sourceLabel: launch?.sourceLabel,
+    })
     setScreen('homework')
     setSidebarOpen(false)
   }
