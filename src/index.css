@@ -1,15 +1,49 @@
-html {
+:root {
+  color-scheme: dark;
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background:
-    radial-gradient(circle at top left, rgba(124, 77, 255, 0.28), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(35, 196, 182, 0.24), transparent 24%),
-    #090b1b;
+  --bg: #080b18;
+  --surface-primary: rgba(14, 18, 36, 0.92);
+  --surface-secondary: rgba(11, 16, 34, 0.98);
+  --surface-tertiary: rgba(255, 255, 255, 0.05);
+  --text-primary: #f6f7ff;
+  --text-secondary: #a8b1d6;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --accent-primary: #7c4dff;
+  --accent-secondary: #1cc9b8;
+  --danger-color: #ff8a80;
+  --shadow-soft: 0 16px 40px rgba(5, 10, 30, 0.28);
+  --shadow-strong: 0 24px 70px rgba(2, 6, 23, 0.4);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #eef3ff;
+  --surface-primary: rgba(255, 255, 255, 0.88);
+  --surface-secondary: rgba(246, 248, 255, 0.96);
+  --surface-tertiary: rgba(116, 130, 184, 0.08);
+  --text-primary: #1d2342;
+  --text-secondary: #61709b;
+  --border-color: rgba(117, 128, 170, 0.14);
+  --border-strong: rgba(117, 128, 170, 0.24);
+  --accent-primary: #6b50ff;
+  --accent-secondary: #1caea3;
+  --danger-color: #d93f5d;
+  --shadow-soft: 0 14px 34px rgba(91, 103, 146, 0.14);
+  --shadow-strong: 0 24px 60px rgba(91, 103, 146, 0.16);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
 }
 
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text-primary);
 }
 
 a {
