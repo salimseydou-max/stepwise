@@ -1196,7 +1196,10 @@ function useTranslator(language: Language): Translate {
   }
 }
 function interpolate(template: string, variables: Record<string, string | number>) {
-  return Object.entries(variables).reduce((text, [key, value]) => text.replaceAll(`{${key}}`, String(value)), template)
+  return Object.entries(variables).reduce(
+    (text, [key, value]) => text.split(`{${key}}`).join(String(value)),
+    template,
+  )
 }
 
 function screenLabel(screen: Screen, t: Translate) {
