@@ -660,8 +660,6 @@ function App() {
     try {
       const assistantText = await requestTutorAnswer({
         history: historySnapshot,
-        question: cleaned,
-        language: state.language,
         labels: getSectionLabels(state.language, t),
       })
 
