@@ -89,6 +89,9 @@ type AppState = {
   chatHistory: ChatMessage[]
   theme: Theme
   language: Language
+  notificationsEnabled: boolean
+  aiSuggestionsEnabled: boolean
+  soundEnabled: boolean
   completionEntries: CompletionEntry[]
   challengeState: ChallengeState
 }
@@ -184,6 +187,10 @@ const translations = {
     french: 'French',
     clearProgress: 'Clear progress',
     clearSearches: 'Clear searches',
+    resetAllData: 'Reset All Data',
+    notifications: 'Notifications',
+    aiSuggestions: 'AI Suggestions',
+    sound: 'Sound',
     recentSearches: 'Recent Searches',
     noRecentSearches: 'No recent activity',
     poweredBy: 'Powered by AI ✨',
@@ -272,6 +279,10 @@ const translations = {
     french: 'Francés',
     clearProgress: 'Borrar progreso',
     clearSearches: 'Borrar búsquedas',
+    resetAllData: 'Restablecer todos los datos',
+    notifications: 'Notificaciones',
+    aiSuggestions: 'Sugerencias de IA',
+    sound: 'Sonido',
     recentSearches: 'Búsquedas recientes',
     noRecentSearches: 'No hay actividad reciente',
     poweredBy: 'Impulsado por IA ✨',
@@ -360,6 +371,10 @@ const translations = {
     french: 'Français',
     clearProgress: 'Effacer les progrès',
     clearSearches: 'Effacer les recherches',
+    resetAllData: 'Réinitialiser toutes les données',
+    notifications: 'Notifications',
+    aiSuggestions: 'Suggestions IA',
+    sound: 'Son',
     recentSearches: 'Recherches récentes',
     noRecentSearches: 'Aucune activité récente',
     poweredBy: 'Propulsé par l’IA ✨',
@@ -388,6 +403,9 @@ function buildDefaultAppState(): AppState {
     chatHistory: [],
     theme: 'dark',
     language: 'en',
+    notificationsEnabled: true,
+    aiSuggestionsEnabled: true,
+    soundEnabled: true,
     completionEntries: [],
     challengeState: initialChallengeState,
   }
