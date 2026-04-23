@@ -4,13 +4,10 @@ import {
   BookOpenText,
   ChartNoAxesColumn,
   ChevronRight,
-  Flame,
   Home,
-  Languages,
   Menu,
   MoonStar,
   Search,
-  Sparkles,
   SunMedium,
   Trophy,
   UserRound,
@@ -45,7 +42,6 @@ type CompletionEntry = {
   completedAt: number
   dayKey: string
   points: number
-  summary: string
   sourceLabel: string
 }
 
@@ -81,21 +77,33 @@ type SubjectDefinition = {
   prompt: string
 }
 
-type TranslationKey = keyof typeof translations.en
+type AppState = {
+  username: string
+  progress: {
+    today: number
+    total: number
+  }
+  streak: number
+  points: number
+  recentSearches: SearchEntry[]
+  chatHistory: ChatMessage[]
+  theme: Theme
+  language: Language
+  completionEntries: CompletionEntry[]
+  challengeState: ChallengeState
+}
 
+type TranslationKey = keyof typeof translations.en
 type Translate = (key: TranslationKey, variables?: Record<string, string | number>) => string
 
-const STORAGE_KEYS = {
-  recentSearches: 'stepwise.recentSearches',
-  completedItems: 'stepwise.completedItems',
-  challengeState: 'stepwise.challengeState',
-  theme: 'stepwise.theme',
-  language: 'stepwise.language',
-  username: 'stepwise.username',
-} as const
-
+const APP_STATE_KEY = 'stepwise.appState.v4'
 const DAILY_GOAL = 5
 const DEFAULT_USERNAME = 'User'
+const MAX_RECENT_SEARCHES = 10
+const MAX_CHAT_CONTEXT = 12
+const OPENAI_BASE_URL = (import.meta.env.VITE_OPENAI_BASE_URL as string | undefined)?.trim() || 'https://api.openai.com/v1'
+const OPENAI_API_KEY = (import.meta.env.VITE_OPENAI_API_KEY as string | undefined)?.trim() || ''
+const OPENAI_MODEL = (import.meta.env.VITE_OPENAI_MODEL as string | undefined)?.trim() || 'gpt-4o-mini'
 
 const initialChallengeState: ChallengeState = {
   'daily-math': { interacted: false, completed: false },
@@ -156,6 +164,7 @@ const translations = {
     solverEmpty: 'Your homework conversation will appear here.',
     solverLoading: 'StepWise is working on your question...',
     solverLongWarning: 'Your question is too long. Please shorten it before sending.',
+    apiError: 'The AI service is unavailable right now. Please try again in a moment.',
     challengesTitle: 'Practice from your active challenges.',
     challengesSubtitle: 'Open any challenge to continue and earn points.',
     progressPageTitle: 'Track every completed problem in one place.',
@@ -184,8 +193,12 @@ const translations = {
     welcomeProgress: 'Progress',
     welcomeProfile: 'Profile',
     chatExplanation: 'Explanation',
-    chatSteps: 'Step-by-step solution',
+    chatSteps: 'Steps',
     chatFinal: 'Final Answer',
+    mathFallbackExplanation:
+      'The AI service is unavailable, but this looks like a simple arithmetic question so I solved it locally.',
+    mathFallbackStepOne: 'Identify the arithmetic expression.',
+    mathFallbackStepTwo: 'Evaluate it carefully using the standard order of operations.',
   },
   es: {
     brand: 'StepWise',
@@ -239,6 +252,7 @@ const translations = {
     solverEmpty: 'Tu conversación de tarea aparecerá aquí.',
     solverLoading: 'StepWise está trabajando en tu pregunta...',
     solverLongWarning: 'Tu pregunta es demasiado larga. Acórtala antes de enviarla.',
+    apiError: 'El servicio de IA no está disponible ahora mismo. Inténtalo de nuevo en un momento.',
     challengesTitle: 'Practica desde tus retos activos.',
     challengesSubtitle: 'Abre cualquier reto para continuar y ganar puntos.',
     progressPageTitle: 'Sigue cada problema completado en un solo lugar.',
@@ -267,8 +281,12 @@ const translations = {
     welcomeProgress: 'Progreso',
     welcomeProfile: 'Perfil',
     chatExplanation: 'Explicación',
-    chatSteps: 'Solución paso a paso',
+    chatSteps: 'Pasos',
     chatFinal: 'Respuesta final',
+    mathFallbackExplanation:
+      'El servicio de IA no está disponible, pero esto parece una operación aritmética simple y la resolví localmente.',
+    mathFallbackStepOne: 'Identifica la expresión aritmética.',
+    mathFallbackStepTwo: 'Evalúala con cuidado usando el orden estándar de operaciones.',
   },
   fr: {
     brand: 'StepWise',
@@ -322,6 +340,7 @@ const translations = {
     solverEmpty: 'Votre conversation de devoirs apparaîtra ici.',
     solverLoading: 'StepWise travaille sur votre question...',
     solverLongWarning: 'Votre question est trop longue. Veuillez la raccourcir.',
+    apiError: 'Le service IA est indisponible pour le moment. Réessayez dans un instant.',
     challengesTitle: 'Travaillez depuis vos défis actifs.',
     challengesSubtitle: 'Ouvrez un défi pour continuer et gagner des points.',
     progressPageTitle: 'Suivez chaque problème terminé au même endroit.',
@@ -350,82 +369,51 @@ const translations = {
     welcomeProgress: 'Progrès',
     welcomeProfile: 'Profil',
     chatExplanation: 'Explication',
-    chatSteps: 'Solution étape par étape',
+    chatSteps: 'Étapes',
     chatFinal: 'Réponse finale',
+    mathFallbackExplanation:
+      'Le service IA est indisponible, mais cela ressemble à une opération arithmétique simple et je l’ai résolue localement.',
+    mathFallbackStepOne: 'Identifiez l’expression arithmétique.',
+    mathFallbackStepTwo: 'Évaluez-la soigneusement en respectant l’ordre habituel des opérations.',
   },
 } as const
 
-const responsePhrases = {
-  en: {
-    clarification:
-      'I need a little more detail before I can solve this accurately. Please share the full homework question or the exact part that is confusing.',
-    mathExplanation:
-      'This looks like a math or science task, so the key is to identify the known information, choose the right formula or principle, and solve carefully in order.',
-    generalExplanation:
-      'This looks more conceptual, so I will explain the main idea first and then organize the answer clearly.',
-    mathSteps: [
-      'List what the problem gives you and identify the unknown.',
-      'Choose the formula, rule, or concept that connects the known values to the answer.',
-      'Work through the solution step by step and check whether the result makes sense.',
-    ],
-    generalSteps: [
-      'Restate the question in simple words so the goal is clear.',
-      'Identify the key idea, evidence, or structure needed for a strong response.',
-      'Turn that understanding into a complete answer with the clearest explanation first.',
-    ],
-    finalMath:
-      'Apply those steps to your exact numbers or worksheet details, and I can verify the final result with you if you send them next.',
-    finalGeneral:
-      'Use that structure for your response, and I can refine it further if you share your draft or teacher prompt.',
-    followUp: 'Using context from your earlier question:',
-  },
-  es: {
-    clarification:
-      'Necesito un poco más de detalle para resolver esto con precisión. Comparte la pregunta completa o la parte exacta que te confunde.',
-    mathExplanation:
-      'Parece una tarea de matemáticas o ciencias, así que lo importante es identificar los datos, elegir la fórmula o el principio correcto y resolver con orden.',
-    generalExplanation:
-      'Parece una pregunta más conceptual, así que primero explicaré la idea principal y luego organizaré la respuesta con claridad.',
-    mathSteps: [
-      'Anota la información dada e identifica lo desconocido.',
-      'Elige la fórmula, regla o concepto que conecta los datos con la respuesta.',
-      'Resuelve paso a paso y comprueba si el resultado tiene sentido.',
-    ],
-    generalSteps: [
-      'Reformula la pregunta con palabras simples para aclarar el objetivo.',
-      'Identifica la idea clave, evidencia o estructura necesaria para una buena respuesta.',
-      'Convierte eso en una respuesta completa empezando por la explicación más clara.',
-    ],
-    finalMath:
-      'Aplica esos pasos a tus números exactos o al contenido de tu hoja, y puedo verificar el resultado final contigo después.',
-    finalGeneral:
-      'Usa esa estructura para tu respuesta y puedo mejorarla más si me compartes tu borrador o la consigna del profesor.',
-    followUp: 'Usando contexto de tu pregunta anterior:',
-  },
-  fr: {
-    clarification:
-      'J’ai besoin d’un peu plus de détails pour résoudre cela correctement. Partagez la question complète ou la partie exacte qui vous bloque.',
-    mathExplanation:
-      'Cela ressemble à un exercice de maths ou de sciences : il faut donc identifier les données, choisir la bonne formule ou le bon principe, puis résoudre dans l’ordre.',
-    generalExplanation:
-      'Cela semble plus conceptuel, donc je vais d’abord expliquer l’idée principale puis organiser la réponse clairement.',
-    mathSteps: [
-      'Notez les informations données et identifiez l’inconnue.',
-      'Choisissez la formule, la règle ou le concept qui relie les données à la réponse.',
-      'Résolvez étape par étape et vérifiez si le résultat est cohérent.',
-    ],
-    generalSteps: [
-      'Reformulez la question avec des mots simples pour clarifier l’objectif.',
-      'Repérez l’idée clé, la preuve ou la structure nécessaire à une bonne réponse.',
-      'Transformez cela en une réponse complète en commençant par l’explication la plus claire.',
-    ],
-    finalMath:
-      'Appliquez ces étapes à vos nombres exacts ou aux détails de votre feuille, et je pourrai vérifier le résultat final ensuite.',
-    finalGeneral:
-      'Utilisez cette structure pour votre réponse, et je peux l’améliorer davantage si vous partagez votre brouillon ou la consigne.',
-    followUp: 'En utilisant le contexte de votre question précédente :',
-  },
-} as const
+function buildDefaultAppState(): AppState {
+  return {
+    username: '',
+    progress: { today: 0, total: 0 },
+    streak: 0,
+    points: 0,
+    recentSearches: [],
+    chatHistory: [],
+    theme: 'dark',
+    language: 'en',
+    completionEntries: [],
+    challengeState: initialChallengeState,
+  }
+}
+
+function syncAppState(state: AppState): AppState {
+  const completionEntries = [...(state.completionEntries ?? [])].sort((left, right) => right.completedAt - left.completedAt)
+  const today = completionEntries.filter((entry) => entry.dayKey === dayKey(Date.now())).length
+  const total = completionEntries.length
+  const points = completionEntries.reduce((sum, entry) => sum + entry.points, 0)
+
+  return {
+    ...buildDefaultAppState(),
+    ...state,
+    progress: { today, total },
+    streak: calculateStreak(completionEntries),
+    points,
+    recentSearches: (state.recentSearches ?? []).slice(0, MAX_RECENT_SEARCHES),
+    chatHistory: state.chatHistory ?? [],
+    completionEntries,
+    challengeState: {
+      ...initialChallengeState,
+      ...(state.challengeState ?? {}),
+    },
+  }
+}
 
 function getChallenges(t: Translate): ChallengeDefinition[] {
   return [
@@ -478,48 +466,74 @@ function getSubjects(t: Translate): SubjectDefinition[] {
 }
 
 function App() {
-  const [screen, setScreen] = useState<Screen>('home')
+  const [screen, setScreen] = useState<Screen>(() => readScreenFromHash())
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [theme, setTheme] = useLocalStorageState<Theme>(STORAGE_KEYS.theme, 'dark')
-  const [language, setLanguage] = useLocalStorageState<Language>(STORAGE_KEYS.language, 'en')
-  const [username, setUsername] = useLocalStorageState<string>(STORAGE_KEYS.username, '')
-  const [recentSearches, setRecentSearches] = useLocalStorageState<SearchEntry[]>(STORAGE_KEYS.recentSearches, [])
-  const [completedItems, setCompletedItems] = useLocalStorageState<CompletionEntry[]>(STORAGE_KEYS.completedItems, [])
-  const [challengeState, setChallengeState] = useLocalStorageState<ChallengeState>(STORAGE_KEYS.challengeState, initialChallengeState)
+  const [appState, setAppState] = useState<AppState>(() => readInitialAppState())
   const [searchInput, setSearchInput] = useState('')
   const [homeNotice, setHomeNotice] = useState('')
   const [homeworkInput, setHomeworkInput] = useState('')
   const [homeworkNotice, setHomeworkNotice] = useState('')
-  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [queuedLaunch, setQueuedLaunch] = useState<LaunchContext | null>(null)
-  const [profileName, setProfileName] = useState(username)
-
-  const t = useTranslator(language)
-  const displayName = username.trim() || DEFAULT_USERNAME
+  const [profileName, setProfileName] = useState('')
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
-  const challenges = useMemo(() => getChallenges(t), [t])
-  const subjects = useMemo(() => getSubjects(t), [t])
-  const todayKey = dayKey(Date.now())
-  const todaySolved = completedItems.filter((item) => item.dayKey === todayKey).length
-  const totalSolved = completedItems.length
-  const totalPoints = completedItems.reduce((sum, item) => sum + item.points, 0)
-  const streak = calculateStreak(completedItems)
-  const progressPercent = Math.min(100, (todaySolved / DAILY_GOAL) * 100)
-  const unseenCount = challenges.filter((challenge) => challenge.startsNew && !challengeState[challenge.id]?.interacted).length
+  const state = useMemo(() => syncAppState(appState), [appState])
+  const t = useTranslator(state.language)
+  const displayName = state.username.trim() || DEFAULT_USERNAME
+  const challenges = useMemo(() => getChallenges(t), [state.language])
+  const subjects = useMemo(() => getSubjects(t), [state.language])
+  const unseenCount = challenges.filter((challenge) => challenge.startsNew && !state.challengeState[challenge.id].interacted).length
+  const progressPercent = Math.min(100, (state.progress.today / DAILY_GOAL) * 100)
+  const navigation = useMemo(
+    () => [
+      { id: 'home' as const, label: t('navHome'), icon: Home },
+      { id: 'homework' as const, label: t('navHomework'), icon: BookOpenText },
+      { id: 'challenges' as const, label: t('navChallenges'), icon: Trophy },
+      { id: 'progress' as const, label: t('navProgress'), icon: ChartNoAxesColumn },
+      { id: 'profile' as const, label: t('navProfile'), icon: UserRound },
+    ],
+    [state.language],
+  )
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
-  }, [theme])
+    if (!isSameState(appState, state)) {
+      setAppState(state)
+    }
+  }, [appState, state])
 
   useEffect(() => {
-    setProfileName(username)
-  }, [username])
+    document.documentElement.dataset.theme = state.theme
+  }, [state.theme])
+
+  useEffect(() => {
+    setProfileName(state.username)
+  }, [state.username])
+
+  useEffect(() => {
+    window.localStorage.setItem(APP_STATE_KEY, JSON.stringify(state))
+  }, [state])
+
+  useEffect(() => {
+    const nextHash = `#${screen}`
+    if (window.location.hash !== nextHash) {
+      window.history.replaceState(null, '', nextHash)
+    }
+  }, [screen])
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setScreen(readScreenFromHash())
+      setSidebarOpen(false)
+    }
+
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isLoading])
+  }, [state.chatHistory, isLoading])
 
   useEffect(() => {
     if (screen !== 'homework' || queuedLaunch === null || isLoading) {
@@ -528,8 +542,12 @@ function App() {
 
     const launch = queuedLaunch
     setQueuedLaunch(null)
-    sendHomeworkMessage(launch.prompt, launch)
+    void sendHomeworkMessage(launch.prompt, launch)
   }, [screen, queuedLaunch, isLoading])
+
+  function updateAppState(updater: (current: AppState) => AppState) {
+    setAppState((current) => syncAppState(updater(syncAppState(current))))
+  }
 
   function openScreen(next: Screen) {
     setScreen(next)
@@ -538,14 +556,17 @@ function App() {
     setHomeworkNotice('')
   }
 
-  function storeSearch(query: string) {
-    setRecentSearches((current) => {
-      const entry: SearchEntry = { id: createId(), query, timestamp: Date.now() }
-      return [entry, ...current.filter((item) => item.query.toLowerCase() !== query.toLowerCase())].slice(0, 10)
-    })
+  function storeRecentSearch(query: string) {
+    updateAppState((current) => ({
+      ...current,
+      recentSearches: [
+        { id: createId(), query, timestamp: Date.now() },
+        ...current.recentSearches.filter((item) => item.query.toLowerCase() !== query.toLowerCase()),
+      ].slice(0, MAX_RECENT_SEARCHES),
+    }))
   }
 
-  function launchHomework(prompt: string, launch?: Omit<LaunchContext, 'prompt'>) {
+  function launchHomework(prompt: string, partial?: Partial<LaunchContext>) {
     const cleaned = prompt.trim()
 
     if (!cleaned) {
@@ -553,34 +574,41 @@ function App() {
       return
     }
 
-    if (launch?.source === 'search') {
-      storeSearch(cleaned)
+    if (partial?.source === 'search') {
+      storeRecentSearch(cleaned)
     }
 
     setHomeNotice('')
+    setHomeworkNotice('')
     setHomeworkInput(cleaned)
     setQueuedLaunch({
       prompt: cleaned,
-      source: launch?.source ?? 'quick-action',
-      rewardPoints: launch?.rewardPoints,
-      completionKey: launch?.completionKey,
-      challengeId: launch?.challengeId,
-      sourceLabel: launch?.sourceLabel,
+      source: partial?.source ?? 'quick-action',
+      rewardPoints: partial?.rewardPoints,
+      completionKey: partial?.completionKey,
+      challengeId: partial?.challengeId,
+      sourceLabel: partial?.sourceLabel,
     })
-    setScreen('homework')
-    setSidebarOpen(false)
+    openScreen('homework')
   }
 
   function handleHomeSearchSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    launchHomework(searchInput, { source: 'search', rewardPoints: 10, sourceLabel: searchInput.trim() || t('navHomework') })
+    launchHomework(searchInput, {
+      source: 'search',
+      rewardPoints: 10,
+      sourceLabel: searchInput.trim() || t('navHomework'),
+    })
     setSearchInput('')
   }
 
   function handleChallengeClick(challenge: ChallengeDefinition) {
-    setChallengeState((current) => ({
+    updateAppState((current) => ({
       ...current,
-      [challenge.id]: { ...current[challenge.id], interacted: true },
+      challengeState: {
+        ...current.challengeState,
+        [challenge.id]: { ...current.challengeState[challenge.id], interacted: true },
+      },
     }))
 
     launchHomework(challenge.prompt, {
@@ -600,7 +628,7 @@ function App() {
     })
   }
 
-  function sendHomeworkMessage(rawInput: string, launch?: LaunchContext) {
+  async function sendHomeworkMessage(rawInput: string, launch?: LaunchContext) {
     const cleaned = rawInput.trim()
 
     if (!cleaned || isLoading) {
@@ -619,84 +647,119 @@ function App() {
       timestamp: Date.now(),
     }
 
-    const nextMessages = [...messages, userMessage]
-    setMessages(nextMessages)
+    const historySnapshot = [...state.chatHistory, userMessage]
+    updateAppState((current) => ({
+      ...current,
+      chatHistory: [...current.chatHistory, userMessage],
+    }))
+
     setHomeworkInput('')
     setHomeworkNotice('')
     setIsLoading(true)
 
-    const responseLanguage = detectInputLanguage(cleaned, language)
+    try {
+      const assistantText = await requestTutorAnswer({
+        history: historySnapshot,
+        question: cleaned,
+        language: state.language,
+        labels: getSectionLabels(state.language, t),
+      })
 
-    window.setTimeout(() => {
-      const aiResult = generateAiResponse(cleaned, responseLanguage, nextMessages, t)
       const assistantMessage: ChatMessage = {
         id: createId(),
         role: 'assistant',
-        text: aiResult,
+        text: assistantText,
         timestamp: Date.now(),
       }
 
-      setMessages((current) => [...current, assistantMessage])
-      setIsLoading(false)
-      recordCompletion(cleaned, userMessage.id, launch)
-    }, 1000 + Math.floor(Math.random() * 800))
-  }
+      updateAppState((current) => ({
+        ...current,
+        chatHistory: [...current.chatHistory, assistantMessage],
+      }))
 
-  function recordCompletion(question: string, messageId: string, launch?: LaunchContext) {
-    const completionKey = launch?.completionKey ?? `message:${messageId}`
-
-    setCompletedItems((current) => {
-      if (current.some((item) => item.completionKey === completionKey)) {
-        return current
+      registerSolvedQuestion(userMessage.id, cleaned, launch)
+    } catch {
+      const fallbackText = buildLocalFallback(cleaned, state.language, t)
+      const assistantMessage: ChatMessage = {
+        id: createId(),
+        role: 'assistant',
+        text: fallbackText ?? t('apiError'),
+        timestamp: Date.now(),
       }
 
-      return [
-        {
-          id: createId(),
-          completionKey,
-          question,
-          completedAt: Date.now(),
-          dayKey: dayKey(Date.now()),
-          points: launch?.rewardPoints ?? 10,
-          summary: question,
-          sourceLabel: launch?.sourceLabel ?? question,
-        },
+      updateAppState((current) => ({
         ...current,
-      ]
-    })
-
-    if (launch?.source === 'challenge' && launch.challengeId) {
-      setChallengeState((current) => ({
-        ...current,
-        [launch.challengeId as ChallengeId]: {
-          ...current[launch.challengeId as ChallengeId],
-          interacted: true,
-          completed: true,
-        },
+        chatHistory: [...current.chatHistory, assistantMessage],
       }))
+
+      if (fallbackText) {
+        registerSolvedQuestion(userMessage.id, cleaned, launch)
+      }
+    } finally {
+      setIsLoading(false)
     }
   }
 
-  function saveProfile() {
-    setUsername(profileName.trim())
+  function registerSolvedQuestion(messageId: string, question: string, launch?: LaunchContext) {
+    const completionKey = launch?.completionKey ?? `message:${messageId}`
+
+    updateAppState((current) => {
+      if (current.completionEntries.some((entry) => entry.completionKey === completionKey)) {
+        return current
+      }
+
+      return {
+        ...current,
+        completionEntries: [
+          {
+            id: createId(),
+            completionKey,
+            question,
+            completedAt: Date.now(),
+            dayKey: dayKey(Date.now()),
+            points: launch?.rewardPoints ?? 10,
+            sourceLabel: launch?.sourceLabel ?? question,
+          },
+          ...current.completionEntries,
+        ],
+        challengeState:
+          launch?.source === 'challenge' && launch.challengeId
+            ? {
+                ...current.challengeState,
+                [launch.challengeId]: {
+                  interacted: true,
+                  completed: true,
+                },
+              }
+            : current.challengeState,
+      }
+    })
   }
 
-  function clearProgress() {
-    setCompletedItems([])
-    setChallengeState(initialChallengeState)
+  function saveProfile() {
+    updateAppState((current) => ({
+      ...current,
+      username: profileName.trim(),
+    }))
   }
 
   function clearSearches() {
-    setRecentSearches([])
+    updateAppState((current) => ({
+      ...current,
+      recentSearches: [],
+    }))
   }
 
-  const navigation = [
-    { id: 'home' as const, label: t('navHome'), icon: Home },
-    { id: 'homework' as const, label: t('navHomework'), icon: BookOpenText },
-    { id: 'challenges' as const, label: t('navChallenges'), icon: Trophy },
-    { id: 'progress' as const, label: t('navProgress'), icon: ChartNoAxesColumn },
-    { id: 'profile' as const, label: t('navProfile'), icon: UserRound },
-  ]
+  function clearProgress() {
+    updateAppState((current) => ({
+      ...current,
+      chatHistory: [],
+      completionEntries: [],
+      challengeState: initialChallengeState,
+    }))
+    setHomeworkNotice('')
+    setHomeNotice('')
+  }
 
   return (
     <div className="stepwise-shell">
@@ -724,7 +787,7 @@ function App() {
             <div className="avatar-pill">{displayName.slice(0, 1).toUpperCase()}</div>
             <div className="user-panel__info">
               <strong>{displayName}</strong>
-              <p>⭐ {interpolate(t('problemsSolved'), { count: totalSolved })}</p>
+              <p>⭐ {interpolate(t('problemsSolved'), { count: state.progress.total })}</p>
             </div>
             <span className="user-notice">{unseenCount}</span>
           </div>
@@ -784,7 +847,17 @@ function App() {
                   <StepCard emoji="🧠" number="2" label={t('stepLearn')} />
                   <StepCard emoji="✨" number="3" label={t('stepSolve')} />
                 </div>
-                <button type="button" className="try-button" onClick={() => launchHomework('Help me solve a homework problem step by step.', { source: 'quick-action', rewardPoints: 10, sourceLabel: t('tryNow') })}>
+                <button
+                  type="button"
+                  className="try-button"
+                  onClick={() =>
+                    launchHomework('Help me solve a homework problem step by step.', {
+                      source: 'quick-action',
+                      rewardPoints: 10,
+                      sourceLabel: t('tryNow'),
+                    })
+                  }
+                >
                   <span>⊕</span> {t('tryNow')}
                 </button>
               </section>
@@ -792,13 +865,13 @@ function App() {
               <section className="progress-card panel-card">
                 <div className="panel-heading panel-heading--center">📊 {t('progressTitle')}</div>
                 <div className="progress-stats-grid">
-                  <StatTile value={String(streak)} label={`${t('streak')} 🔥`} tone="purple" />
-                  <StatTile value={String(todaySolved)} label={`${t('today')} 🛰`} tone="blue" />
-                  <StatTile value={String(totalSolved)} label={`${t('total')} ⭐`} tone="green" />
+                  <StatTile value={String(state.streak)} label={`${t('streak')} 🔥`} tone="purple" />
+                  <StatTile value={String(state.progress.today)} label={`${t('today')} 🛰`} tone="blue" />
+                  <StatTile value={String(state.progress.total)} label={`${t('total')} ⭐`} tone="green" />
                 </div>
                 <div className="goal-row">
                   <span>{interpolate(t('dailyGoal'), { count: DAILY_GOAL })}</span>
-                  <strong>{Math.min(todaySolved, DAILY_GOAL)}/{DAILY_GOAL}</strong>
+                  <strong>{Math.min(state.progress.today, DAILY_GOAL)}/{DAILY_GOAL}</strong>
                 </div>
                 <div className="goal-track">
                   <div className="goal-track__fill" style={{ width: `${progressPercent}%` }} />
@@ -815,7 +888,7 @@ function App() {
                   <ChallengeCard
                     key={challenge.id}
                     challenge={challenge}
-                    showNew={challenge.startsNew && !challengeState[challenge.id].interacted}
+                    showNew={challenge.startsNew && !state.challengeState[challenge.id].interacted}
                     onClick={() => handleChallengeClick(challenge)}
                   />
                 ))}
@@ -831,7 +904,7 @@ function App() {
                   <span className="leaderboard-avatar">{displayName.slice(0, 1).toUpperCase()}</span>
                   <div>
                     <strong>{displayName} {t('you')}</strong>
-                    <p>{totalPoints} {t('points')}</p>
+                    <p>{state.points} {t('points')}</p>
                   </div>
                 </div>
                 <span className="leaderboard-rank">#1</span>
@@ -861,12 +934,12 @@ function App() {
 
               <section className="homework-chat panel-card">
                 <div className="chat-stream">
-                  {messages.length === 0 && !isLoading ? <div className="chat-empty">{t('solverEmpty')}</div> : null}
-                  {messages.map((message) => (
+                  {state.chatHistory.length === 0 && !isLoading ? <div className="chat-empty">{t('solverEmpty')}</div> : null}
+                  {state.chatHistory.map((message) => (
                     <article key={message.id} className={`chat-bubble chat-bubble--${message.role}`}>
                       <div className="chat-bubble__meta">
                         <strong>{message.role === 'user' ? displayName : t('brand')}</strong>
-                        <span>{formatShortTime(message.timestamp, language)}</span>
+                        <span>{formatShortTime(message.timestamp, state.language)}</span>
                       </div>
                       <p>{message.text}</p>
                     </article>
@@ -884,7 +957,7 @@ function App() {
                   className="homework-form"
                   onSubmit={(event) => {
                     event.preventDefault()
-                    sendHomeworkMessage(homeworkInput)
+                    void sendHomeworkMessage(homeworkInput)
                   }}
                 >
                   <textarea
@@ -917,7 +990,7 @@ function App() {
                   <ChallengeCard
                     key={challenge.id}
                     challenge={challenge}
-                    showNew={challenge.startsNew && !challengeState[challenge.id].interacted}
+                    showNew={challenge.startsNew && !state.challengeState[challenge.id].interacted}
                     onClick={() => handleChallengeClick(challenge)}
                   />
                 ))}
@@ -936,22 +1009,22 @@ function App() {
               </header>
 
               <div className="progress-summary-grid">
-                <StatTile value={String(streak)} label={`${t('streak')} 🔥`} tone="purple" />
-                <StatTile value={String(todaySolved)} label={`${t('today')} 🛰`} tone="blue" />
-                <StatTile value={String(totalSolved)} label={`${t('total')} ⭐`} tone="green" />
+                <StatTile value={String(state.streak)} label={`${t('streak')} 🔥`} tone="purple" />
+                <StatTile value={String(state.progress.today)} label={`${t('today')} 🛰`} tone="blue" />
+                <StatTile value={String(state.progress.total)} label={`${t('total')} ⭐`} tone="green" />
               </div>
 
               <section className="panel-card history-panel">
-                {completedItems.length === 0 ? (
+                {state.completionEntries.length === 0 ? (
                   <div className="empty-history">{t('progressEmpty')}</div>
                 ) : (
-                  completedItems.map((item) => (
+                  state.completionEntries.map((item) => (
                     <article key={item.id} className="history-item">
                       <div>
                         <strong>{item.sourceLabel}</strong>
                         <p>{item.question}</p>
                       </div>
-                      <span>{t('completedOn')} {formatDateTime(item.completedAt, language)}</span>
+                      <span>{t('completedOn')} {formatDateTime(item.completedAt, state.language)}</span>
                     </article>
                   ))
                 )}
@@ -985,17 +1058,30 @@ function App() {
                 <section className="panel-card settings-panel">
                   <label>
                     <span>{t('languageLabel')}</span>
-                    <select value={language} onChange={(event) => setLanguage(event.target.value as Language)}>
+                    <select
+                      value={state.language}
+                      onChange={(event) =>
+                        updateAppState((current) => ({ ...current, language: event.target.value as Language }))
+                      }
+                    >
                       <option value="en">{t('english')}</option>
                       <option value="es">{t('spanish')}</option>
                       <option value="fr">{t('french')}</option>
                     </select>
                   </label>
                   <div className="theme-toggle-row">
-                    <button type="button" className={`theme-toggle ${theme === 'dark' ? 'theme-toggle--active' : ''}`} onClick={() => setTheme('dark')}>
+                    <button
+                      type="button"
+                      className={`theme-toggle ${state.theme === 'dark' ? 'theme-toggle--active' : ''}`}
+                      onClick={() => updateAppState((current) => ({ ...current, theme: 'dark' }))}
+                    >
                       <MoonStar size={16} /> {t('dark')}
                     </button>
-                    <button type="button" className={`theme-toggle ${theme === 'light' ? 'theme-toggle--active' : ''}`} onClick={() => setTheme('light')}>
+                    <button
+                      type="button"
+                      className={`theme-toggle ${state.theme === 'light' ? 'theme-toggle--active' : ''}`}
+                      onClick={() => updateAppState((current) => ({ ...current, theme: 'light' }))}
+                    >
                       <SunMedium size={16} /> {t('light')}
                     </button>
                   </div>
@@ -1008,14 +1094,25 @@ function App() {
                   </div>
                   <div>
                     <h2>{t('recentSearches')}</h2>
-                    {recentSearches.length === 0 ? (
+                    {state.recentSearches.length === 0 ? (
                       <p className="recent-empty">{t('noRecentSearches')}</p>
                     ) : (
                       <div className="recent-search-list">
-                        {recentSearches.map((entry) => (
-                          <button key={entry.id} type="button" className="recent-search-item" onClick={() => launchHomework(entry.query, { source: 'search', rewardPoints: 10, sourceLabel: entry.query })}>
+                        {state.recentSearches.map((entry) => (
+                          <button
+                            key={entry.id}
+                            type="button"
+                            className="recent-search-item"
+                            onClick={() =>
+                              launchHomework(entry.query, {
+                                source: 'search',
+                                rewardPoints: 10,
+                                sourceLabel: entry.query,
+                              })
+                            }
+                          >
                             <span>{entry.query}</span>
-                            <strong>{formatShortTime(entry.timestamp, language)}</strong>
+                            <strong>{formatShortTime(entry.timestamp, state.language)}</strong>
                           </button>
                         ))}
                       </div>
@@ -1031,7 +1128,17 @@ function App() {
   )
 }
 
-function SidebarButton({ icon: Icon, label, active, onClick }: { icon: LucideIcon; label: string; active: boolean; onClick: () => void }) {
+function SidebarButton({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: LucideIcon
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
   return (
     <button type="button" className={`sidebar-button ${active ? 'sidebar-button--active' : ''}`} onClick={onClick}>
       <span className="sidebar-button__icon"><Icon size={16} /></span>
@@ -1060,7 +1167,15 @@ function StatTile({ value, label, tone }: { value: string; label: string; tone: 
   )
 }
 
-function ChallengeCard({ challenge, showNew, onClick }: { challenge: ChallengeDefinition; showNew: boolean; onClick: () => void }) {
+function ChallengeCard({
+  challenge,
+  showNew,
+  onClick,
+}: {
+  challenge: ChallengeDefinition
+  showNew: boolean
+  onClick: () => void
+}) {
   return (
     <button type="button" className="challenge-card" onClick={onClick}>
       <span className={`challenge-card__icon challenge-card__icon--${challenge.tone}`}>{challenge.icon}</span>
@@ -1091,29 +1206,17 @@ function SubjectCard({ subject, onClick }: { subject: SubjectDefinition; onClick
   )
 }
 
-function useLocalStorageState<T>(key: string, initialValue: T) {
-  const [value, setValue] = useState<T>(() => {
-    if (typeof window === 'undefined') {
-      return initialValue
-    }
+function readInitialAppState(): AppState {
+  if (typeof window === 'undefined') {
+    return buildDefaultAppState()
+  }
 
-    try {
-      const stored = window.localStorage.getItem(key)
-      return stored ? (JSON.parse(stored) as T) : initialValue
-    } catch {
-      return initialValue
-    }
-  })
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(key, JSON.stringify(value))
-    } catch {
-      // Ignore storage write failures.
-    }
-  }, [key, value])
-
-  return [value, setValue] as const
+  try {
+    const raw = window.localStorage.getItem(APP_STATE_KEY)
+    return raw ? syncAppState(JSON.parse(raw) as AppState) : buildDefaultAppState()
+  } catch {
+    return buildDefaultAppState()
+  }
 }
 
 function useTranslator(language: Language): Translate {
@@ -1124,11 +1227,14 @@ function useTranslator(language: Language): Translate {
 }
 
 function interpolate(template: string, variables: Record<string, string | number>) {
-  return Object.entries(variables).reduce((current, [key, value]) => current.split(`{${key}}`).join(String(value)), template)
+  return Object.entries(variables).reduce(
+    (current, [key, value]) => current.split(`{${key}}`).join(String(value)),
+    template,
+  )
 }
 
 function createId() {
-  return `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+  return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
 }
 
 function dayKey(timestamp: number) {
@@ -1138,12 +1244,12 @@ function dayKey(timestamp: number) {
 }
 
 function calculateStreak(entries: CompletionEntry[]) {
-  const solvedDays = new Set(entries.map((entry) => entry.dayKey))
+  const days = new Set(entries.map((entry) => entry.dayKey))
   const cursor = new Date()
   cursor.setHours(0, 0, 0, 0)
   let streak = 0
 
-  while (solvedDays.has(cursor.toISOString())) {
+  while (days.has(cursor.toISOString())) {
     streak += 1
     cursor.setDate(cursor.getDate() - 1)
   }
@@ -1151,12 +1257,30 @@ function calculateStreak(entries: CompletionEntry[]) {
   return streak
 }
 
+function readScreenFromHash(): Screen {
+  const value = window.location.hash.replace('#', '')
+  if (value === 'homework' || value === 'challenges' || value === 'progress' || value === 'profile') {
+    return value
+  }
+  return 'home'
+}
+
+function isSameState(left: AppState, right: AppState) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
 function formatShortTime(timestamp: number, language: Language) {
-  return new Intl.DateTimeFormat(localeForLanguage(language), { hour: 'numeric', minute: '2-digit' }).format(timestamp)
+  return new Intl.DateTimeFormat(localeForLanguage(language), {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(timestamp)
 }
 
 function formatDateTime(timestamp: number, language: Language) {
-  return new Intl.DateTimeFormat(localeForLanguage(language), { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp)
+  return new Intl.DateTimeFormat(localeForLanguage(language), {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(timestamp)
 }
 
 function localeForLanguage(language: Language) {
@@ -1167,50 +1291,149 @@ function localeForLanguage(language: Language) {
 
 function detectInputLanguage(input: string, fallback: Language): Language {
   const normalized = input.toLowerCase()
-  if (/[¿¡]|\b(tarea|resolver|ecuacion|pregunta|explica|fraccion)\b/i.test(normalized)) return 'es'
-  if (/[àâçéèêëîïôûùüÿœ]|\b(devoir|question|explique|equation|fraction)\b/i.test(normalized)) return 'fr'
+  if (/[¿¡]|\b(tarea|resolver|ecuacion|fraccion|calcula|pregunta)\b/i.test(normalized)) return 'es'
+  if (/[àâçéèêëîïôûùüÿœ]|\b(devoir|question|equation|fraction|calcule)\b/i.test(normalized)) return 'fr'
   return fallback
 }
 
-function generateAiResponse(input: string, language: Language, history: ChatMessage[], t: Translate) {
-  const phrases = responsePhrases[language]
-  const normalized = input.toLowerCase()
-  const words = input.trim().split(/\s+/).filter(Boolean)
-  const previousUserMessage = [...history].reverse().find((message) => message.role === 'user' && message.text !== input)
-  const isTechnical = /(math|science|physics|chemistry|biology|algebra|equation|fraction|force|energy|solve|calculate|triangle|graph|historia|matematicas|science|devoir)/i.test(normalized)
+function getSectionLabels(language: Language, t: Translate) {
+  return {
+    explanation: t('chatExplanation'),
+    steps: t('chatSteps'),
+    final: t('chatFinal'),
+    languageName: language === 'es' ? 'Spanish' : language === 'fr' ? 'French' : 'English',
+  }
+}
 
-  if (words.length < 4) {
-    return [
-      `${t('chatExplanation')}:`,
-      phrases.clarification,
-      '',
-      `${t('chatSteps')}:`,
-      '1. Share the full problem statement.',
-      '2. Tell me which part feels confusing.',
-      '3. I will then explain and solve it clearly.',
-      '',
-      `${t('chatFinal')}:`,
-      phrases.clarification,
-    ].join('\n')
+async function requestTutorAnswer({
+  history,
+  labels,
+}: {
+  history: ChatMessage[]
+  labels: { explanation: string; steps: string; final: string; languageName: string }
+}) {
+  if (!OPENAI_API_KEY) {
+    throw new Error('Missing API key')
   }
 
-  const explanation = isTechnical ? phrases.mathExplanation : phrases.generalExplanation
-  const steps = isTechnical ? phrases.mathSteps : phrases.generalSteps
-  const finalAnswer = isTechnical ? phrases.finalMath : phrases.finalGeneral
+  const systemPrompt = [
+    'You are an AI tutor. Always:',
+    '- Answer the question',
+    '- Explain clearly',
+    '- Show steps',
+    '- Give final answer',
+    '',
+    "Never refuse simple questions like '1+1'.",
+    'If unclear, make a reasonable assumption.',
+    '',
+    `Respond in ${labels.languageName}.`,
+    `Use exactly this structure: ${labels.explanation}: ... ${labels.steps}: ... ${labels.final}: ...`,
+  ].join('\n')
+
+  const response = await fetch(`${OPENAI_BASE_URL.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      temperature: 0.4,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...history.slice(-MAX_CHAT_CONTEXT).map((message) => ({
+          role: message.role,
+          content: message.text,
+        })),
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`API request failed with ${response.status}`)
+  }
+
+  const data = (await response.json()) as {
+    choices?: Array<{
+      message?: {
+        content?: string | Array<{ type?: string; text?: string }>
+      }
+    }>
+  }
+
+  const content = data.choices?.[0]?.message?.content
+  const text = Array.isArray(content)
+    ? content.map((item) => item.text ?? '').join('').trim()
+    : String(content ?? '').trim()
+
+  if (!text) {
+    throw new Error('Missing assistant content')
+  }
+
+  if (text.includes(labels.explanation) && text.includes(labels.steps) && text.includes(labels.final)) {
+    return text
+  }
+
+  return [
+    `${labels.explanation}:`,
+    text,
+    '',
+    `${labels.steps}:`,
+    '1. Review the explanation above.',
+    '2. Apply it directly to the question.',
+    '',
+    `${labels.final}:`,
+    text,
+  ].join('\n')
+}
+
+function buildLocalFallback(question: string, language: Language, t: Translate) {
+  const solution = solveSimpleMath(question)
+  if (!solution) {
+    return null
+  }
 
   return [
     `${t('chatExplanation')}:`,
-    explanation,
-    previousUserMessage ? `\n${phrases.followUp} ${previousUserMessage.text}` : '',
+    t('mathFallbackExplanation'),
     '',
     `${t('chatSteps')}:`,
-    ...steps.map((step, index) => `${index + 1}. ${step}`),
+    `1. ${t('mathFallbackStepOne')} ${solution.expression}`,
+    `2. ${t('mathFallbackStepTwo')}`,
     '',
     `${t('chatFinal')}:`,
-    finalAnswer,
-  ]
-    .filter(Boolean)
-    .join('\n')
+    `${solution.result}`,
+  ].join('\n')
+}
+
+function solveSimpleMath(input: string) {
+  const cleaned = input
+    .toLowerCase()
+    .replace(/[×x]/g, '*')
+    .replace(/÷/g, '/')
+    .replace(/,/g, '.')
+    .replace(/\^/g, '**')
+    .replace(/what is|what's|calculate|solve|please|can you solve|cu[aá]nto es|calcula|resuelve|combien fait|calcule|résous|quel est/gi, ' ')
+    .replace(/[=?]/g, ' ')
+    .trim()
+
+  if (!cleaned || !/^[\d\s+\-*/().*]+$/.test(cleaned) || /\*{3,}/.test(cleaned)) {
+    return null
+  }
+
+  try {
+    const result = Function(`"use strict"; return (${cleaned})`)() as number
+    if (typeof result !== 'number' || !Number.isFinite(result)) {
+      return null
+    }
+
+    return {
+      expression: cleaned,
+      result: Number.isInteger(result) ? result : Number(result.toFixed(6)),
+    }
+  } catch {
+    return null
+  }
 }
 
 export default App
