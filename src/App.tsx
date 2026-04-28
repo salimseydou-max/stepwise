@@ -746,11 +746,11 @@ function App() {
 
       registerSolvedQuestion(userMessage.id, cleaned, launch)
     } catch {
-      const fallbackText = buildLocalFallback(cleaned, state.language, t)
+      const fallbackText = buildLocalFallback(cleaned, state.language, t, historySnapshot)
       const assistantMessage: ChatMessage = {
         id: createId(),
         role: 'assistant',
-        text: fallbackText ?? t('apiError'),
+        text: fallbackText,
         timestamp: Date.now(),
       }
 
@@ -759,9 +759,7 @@ function App() {
         chatHistory: [...current.chatHistory, assistantMessage],
       }))
 
-      if (fallbackText) {
-        registerSolvedQuestion(userMessage.id, cleaned, launch)
-      }
+      registerSolvedQuestion(userMessage.id, cleaned, launch)
     } finally {
       setIsLoading(false)
     }
@@ -1667,10 +1665,69 @@ async function requestTutorAnswer({
   ].join('\n')
 }
 
-function buildLocalFallback(question: string, language: Language, t: Translate) {
+function buildLocalFallback(
+  question: string,
+  language: Language,
+  t: Translate,
+  history: ChatMessage[],
+) {
   const solution = solveSimpleMath(question)
   if (!solution) {
-    return null
+    const phrases = localTutorPhrases[language]
+    const normalized = question.toLowerCase()
+    const previousUserMessage = [...history]
+      .reverse()
+      .find((message) => message.role === 'user' && message.text !== question)
+
+    const topic = /(essay|paragraph|theme|thesis|reading|book|poem|summary|character)/i.test(normalized)
+      ? 'writing'
+      : /(history|war|revolution|government|civilization|president|empire)/i.test(normalized)
+        ? 'history'
+        : /(math|algebra|geometry|equation|fraction|calculate|solve|physics|chemistry|biology|science|cell|force|energy|graph)/i.test(
+              normalized,
+            )
+          ? 'stem'
+          : 'general'
+
+    const topicMap = {
+      stem: {
+        explanation: phrases.stemExplanation,
+        steps: phrases.stemSteps,
+        finalAnswer: phrases.stemFinal,
+      },
+      writing: {
+        explanation: phrases.writingExplanation,
+        steps: phrases.writingSteps,
+        finalAnswer: phrases.writingFinal,
+      },
+      history: {
+        explanation: phrases.historyExplanation,
+        steps: phrases.historySteps,
+        finalAnswer: phrases.historyFinal,
+      },
+      general: {
+        explanation: phrases.generalExplanation,
+        steps: phrases.generalSteps,
+        finalAnswer: phrases.generalFinal,
+      },
+    } as const
+
+    const selected = topicMap[topic]
+
+    return [
+      `${t('chatExplanation')}:`,
+      selected.explanation,
+      previousUserMessage ? `${phrases.followUp} ${previousUserMessage.text}` : '',
+      `${phrases.assumptionPrefix} "${question.trim()}".`,
+      '',
+      `${t('chatSteps')}:`,
+      ...selected.steps.map((step, index) => `${index + 1}. ${step}`),
+      '',
+      `${t('chatFinal')}:`,
+      selected.finalAnswer,
+    ]
+      .filter(Boolean)
+      .join('\n')
   }
 
   return [
@@ -1685,6 +1742,129 @@ function buildLocalFallback(question: string, language: Language, t: Translate) 
     `${solution.result}`,
   ].join('\n')
 }
+
+const localTutorPhrases = {
+  en: {
+    assumptionPrefix: 'I am making a reasonable tutoring assumption based on',
+    followUp: 'I also considered your earlier question:',
+    stemExplanation:
+      'This looks like a STEM homework question, so the safest way forward is to identify what is known, choose the correct formula or concept, and solve in a clear order.',
+    stemSteps: [
+      'Write down the known values, terms, or conditions from the problem.',
+      'Choose the rule, formula, or scientific idea that best matches what you need to find.',
+      'Work through the solution one step at a time and check whether the result is reasonable.',
+    ],
+    stemFinal:
+      'Use the structure above on your exact homework numbers or prompt, and you should get a correct step-by-step answer. If you share the full problem statement, the solution can be made more precise.',
+    writingExplanation:
+      'This looks like a writing or reading task, so a strong answer should state the main idea clearly, support it with evidence, and explain why that evidence matters.',
+    writingSteps: [
+      'Restate the question in simple words so the goal is clear.',
+      'Choose the strongest idea, quote, or example that supports your answer.',
+      'Turn that evidence into a short explanation that directly answers the assignment.',
+    ],
+    writingFinal:
+      'A good final response should include a clear claim, one or two supporting details, and a brief explanation that ties everything back to the question.',
+    historyExplanation:
+      'This looks like a history or social studies question, so the answer should identify the event, explain its context, and connect it to its impact.',
+    historySteps: [
+      'Name the event, person, or issue the question is asking about.',
+      'Explain the important context or causes around it.',
+      'Conclude with why it mattered or what changed because of it.',
+    ],
+    historyFinal:
+      'Your final answer should briefly explain what happened, why it happened, and why it was important.',
+    generalExplanation:
+      'This appears to be a general homework question. I can still help by making a reasonable assumption and giving you a clear way to answer it.',
+    generalSteps: [
+      'Identify what the teacher is most likely asking you to explain or solve.',
+      'Organize the answer into the simplest sequence possible.',
+      'Finish with the clearest conclusion or result you can state from the available information.',
+    ],
+    generalFinal:
+      'Based on the question as written, the best next step is to answer directly, keep the reasoning simple, and refine it once you have the full assignment wording.',
+  },
+  es: {
+    assumptionPrefix: 'Estoy haciendo una suposición razonable de tutoría basada en',
+    followUp: 'También tuve en cuenta tu pregunta anterior:',
+    stemExplanation:
+      'Parece una pregunta de ciencias o matemáticas, así que lo más seguro es identificar lo conocido, elegir la fórmula o el concepto correcto y resolver con un orden claro.',
+    stemSteps: [
+      'Anota los datos, términos o condiciones que ya aparecen en el problema.',
+      'Elige la fórmula, regla o idea científica que mejor se relaciona con lo que debes encontrar.',
+      'Resuelve paso a paso y comprueba si el resultado tiene sentido.',
+    ],
+    stemFinal:
+      'Usa esa estructura con los números exactos o el enunciado completo y tendrás una respuesta paso a paso más precisa.',
+    writingExplanation:
+      'Parece una tarea de lectura o escritura, así que una buena respuesta debe presentar la idea principal, apoyarla con evidencia y explicar por qué esa evidencia importa.',
+    writingSteps: [
+      'Reformula la pregunta con palabras simples para aclarar el objetivo.',
+      'Elige la mejor idea, cita o ejemplo para apoyar tu respuesta.',
+      'Convierte esa evidencia en una explicación breve que responda directamente a la tarea.',
+    ],
+    writingFinal:
+      'Una buena respuesta final debe incluir una idea clara, uno o dos detalles de apoyo y una explicación breve conectada con la pregunta.',
+    historyExplanation:
+      'Parece una pregunta de historia o estudios sociales, así que la respuesta debe identificar el evento, explicar su contexto y conectarlo con su impacto.',
+    historySteps: [
+      'Nombra el evento, la persona o el tema por el que pregunta el ejercicio.',
+      'Explica el contexto o las causas importantes.',
+      'Concluye con por qué fue importante o qué cambió a partir de eso.',
+    ],
+    historyFinal:
+      'Tu respuesta final debe explicar brevemente qué pasó, por qué pasó y por qué fue importante.',
+    generalExplanation:
+      'Parece una pregunta general de tarea. Aun así puedo ayudarte haciendo una suposición razonable y dándote una forma clara de responder.',
+    generalSteps: [
+      'Identifica qué es lo más probable que el profesor quiera que expliques o resuelvas.',
+      'Organiza la respuesta en la secuencia más simple posible.',
+      'Termina con la conclusión o resultado más claro que puedas obtener con la información disponible.',
+    ],
+    generalFinal:
+      'Con la pregunta tal como está escrita, lo mejor es responder de forma directa, mantener el razonamiento simple y ajustar la respuesta cuando tengas el enunciado completo.',
+  },
+  fr: {
+    assumptionPrefix: 'Je fais une hypothèse raisonnable de tutorat à partir de',
+    followUp: 'J’ai aussi pris en compte votre question précédente :',
+    stemExplanation:
+      'Cela ressemble à une question de maths ou de sciences. Le plus fiable est donc d’identifier les données connues, de choisir la bonne formule ou le bon concept, puis de résoudre dans un ordre clair.',
+    stemSteps: [
+      'Notez les données, termes ou conditions déjà présents dans l’énoncé.',
+      'Choisissez la formule, la règle ou l’idée scientifique qui correspond le mieux à ce qu’il faut trouver.',
+      'Résolvez étape par étape puis vérifiez si le résultat est cohérent.',
+    ],
+    stemFinal:
+      'En appliquant cette structure à vos valeurs exactes ou à l’énoncé complet, vous obtiendrez une réponse plus précise étape par étape.',
+    writingExplanation:
+      'Cela ressemble à une tâche de lecture ou d’écriture. Une bonne réponse doit donc présenter l’idée principale, l’appuyer par une preuve, puis expliquer pourquoi cette preuve est importante.',
+    writingSteps: [
+      'Reformulez la question avec des mots simples pour clarifier l’objectif.',
+      'Choisissez l’idée, la citation ou l’exemple le plus fort pour soutenir votre réponse.',
+      'Transformez cette preuve en une explication courte qui répond directement au devoir.',
+    ],
+    writingFinal:
+      'Une bonne réponse finale doit contenir une idée claire, un ou deux détails d’appui et une brève explication liée à la question.',
+    historyExplanation:
+      'Cela ressemble à une question d’histoire ou de sciences sociales. La réponse doit donc identifier l’événement, expliquer son contexte et le relier à son impact.',
+    historySteps: [
+      'Nommez l’événement, la personne ou le sujet visé par la question.',
+      'Expliquez le contexte ou les causes importantes.',
+      'Concluez par ce qui a changé ou pourquoi cela a compté.',
+    ],
+    historyFinal:
+      'Votre réponse finale doit expliquer brièvement ce qui s’est passé, pourquoi cela s’est produit et pourquoi c’était important.',
+    generalExplanation:
+      'Cela ressemble à une question générale de devoir. Je peux quand même vous aider en faisant une hypothèse raisonnable et en proposant une manière claire d’y répondre.',
+    generalSteps: [
+      'Identifiez ce que l’enseignant demande probablement d’expliquer ou de résoudre.',
+      'Organisez la réponse dans l’ordre le plus simple possible.',
+      'Terminez par la conclusion ou le résultat le plus clair que vous pouvez donner avec les informations disponibles.',
+    ],
+    generalFinal:
+      'Avec la question telle qu’elle est formulée, le mieux est de répondre directement, de garder un raisonnement simple, puis d’affiner une fois l’énoncé complet disponible.',
+  },
+} as const
 
 function solveSimpleMath(input: string) {
   const cleaned = input
