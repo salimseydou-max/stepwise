@@ -766,13 +766,19 @@ function App() {
     }))
   }
 
-  function clearProgress() {
-    updateAppState((current) => ({
-      ...current,
-      chatHistory: [],
-      completionEntries: [],
-      challengeState: initialChallengeState,
-    }))
+  function resetAllData() {
+    const resetState = buildDefaultAppState()
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(APP_STATE_KEY)
+    }
+
+    setAppState(resetState)
+    setProfileName(resetState.username)
+    setSearchInput('')
+    setHomeworkInput('')
+    setHomeNotice('')
+    setHomeworkNotice('')
+    setQueuedLaunch(null)
     setHomeworkNotice('')
     setHomeNotice('')
   }
@@ -1101,12 +1107,42 @@ function App() {
                       <SunMedium size={16} /> {t('light')}
                     </button>
                   </div>
+                  <SettingToggleRow
+                    label={t('notifications')}
+                    enabled={state.notificationsEnabled}
+                    onToggle={() =>
+                      updateAppState((current) => ({
+                        ...current,
+                        notificationsEnabled: !current.notificationsEnabled,
+                      }))
+                    }
+                  />
+                  <SettingToggleRow
+                    label={t('aiSuggestions')}
+                    enabled={state.aiSuggestionsEnabled}
+                    onToggle={() =>
+                      updateAppState((current) => ({
+                        ...current,
+                        aiSuggestionsEnabled: !current.aiSuggestionsEnabled,
+                      }))
+                    }
+                  />
+                  <SettingToggleRow
+                    label={t('sound')}
+                    enabled={state.soundEnabled}
+                    onToggle={() =>
+                      updateAppState((current) => ({
+                        ...current,
+                        soundEnabled: !current.soundEnabled,
+                      }))
+                    }
+                  />
                 </section>
 
                 <section className="panel-card settings-panel settings-panel--wide">
                   <div className="profile-actions">
                     <button type="button" className="ghost-button" onClick={clearSearches}>{t('clearSearches')}</button>
-                    <button type="button" className="ghost-button" onClick={clearProgress}>{t('clearProgress')}</button>
+                    <button type="button" className="ghost-button" onClick={resetAllData}>{t('resetAllData')}</button>
                   </div>
                   <div>
                     <h2>{t('recentSearches')}</h2>
@@ -1180,6 +1216,29 @@ function StatTile({ value, label, tone }: { value: string; label: string; tone: 
       <strong>{value}</strong>
       <span>{label}</span>
     </article>
+  )
+}
+
+function SettingToggleRow({
+  label,
+  enabled,
+  onToggle,
+}: {
+  label: string
+  enabled: boolean
+  onToggle: () => void
+}) {
+  return (
+    <div className="theme-toggle-row">
+      <span>{label}</span>
+      <button
+        type="button"
+        className={`theme-toggle ${enabled ? 'theme-toggle--active' : ''}`}
+        onClick={onToggle}
+      >
+        {enabled ? 'On' : 'Off'}
+      </button>
+    </div>
   )
 }
 
