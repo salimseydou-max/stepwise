@@ -88,35 +88,40 @@ alter table public.challenge_progress enable row level security;
 
 -- Demo/public policies for anonymous client-side persistence.
 -- Replace these with auth.uid()-based policies before production auth rollout.
-create policy if not exists "public profiles access"
+drop policy if exists "public profiles access" on public.student_profiles;
+create policy "public profiles access"
   on public.student_profiles
   for all
   to anon, authenticated
   using (true)
   with check (true);
 
-create policy if not exists "public recent searches access"
+drop policy if exists "public recent searches access" on public.recent_searches;
+create policy "public recent searches access"
   on public.recent_searches
   for all
   to anon, authenticated
   using (true)
   with check (true);
 
-create policy if not exists "public chat messages access"
+drop policy if exists "public chat messages access" on public.chat_messages;
+create policy "public chat messages access"
   on public.chat_messages
   for all
   to anon, authenticated
   using (true)
   with check (true);
 
-create policy if not exists "public completion entries access"
+drop policy if exists "public completion entries access" on public.completion_entries;
+create policy "public completion entries access"
   on public.completion_entries
   for all
   to anon, authenticated
   using (true)
   with check (true);
 
-create policy if not exists "public challenge progress access"
+drop policy if exists "public challenge progress access" on public.challenge_progress;
+create policy "public challenge progress access"
   on public.challenge_progress
   for all
   to anon, authenticated
