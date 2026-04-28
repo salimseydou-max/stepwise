@@ -1410,6 +1410,159 @@ function formatDateTime(timestamp: number, language: Language) {
   }).format(timestamp)
 }
 
+function readOrCreateProfileId() {
+  const storageKey = 'stepwise.profileId'
+
+  if (typeof window === 'undefined') {
+    return crypto.randomUUID()
+  }
+
+  const existing = window.localStorage.getItem(storageKey)
+  if (existing) {
+    return existing
+  }
+
+  const generated = crypto.randomUUID()
+  window.localStorage.setItem(storageKey, generated)
+  return generated
+}
+
+function appStateFromRemoteSnapshot(snapshot: RemoteSnapshot): AppState {
+  return syncAppState({
+    ...buildDefaultAppState(),
+    username: snapshot.username,
+    theme: snapshot.theme,
+    language: snapshot.language,
+    notificationsEnabled: snapshot.notificationsEnabled,
+    aiSuggestionsEnabled: snapshot.aiSuggestionsEnabled,
+    soundEnabled: snapshot.soundEnabled,
+    recentSearches: snapshot.recentSearches.map((entry) => ({
+      id: entry.id,
+      query: entry.query,
+      timestamp: entry.timestamp,
+    })),
+    chatHistory: snapshot.chatHistory.map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      timestamp: message.timestamp,
+    })),
+    completionEntries: snapshot.completionEntries.map((entry) => ({
+      id: entry.id,
+      completionKey: entry.completionKey,
+      question: entry.question,
+      completedAt: entry.completedAt,
+      dayKey: entry.dayKey,
+      points: entry.points,
+      sourceLabel: entry.sourceLabel,
+    })),
+    challengeState: {
+      ...initialChallengeState,
+      ...Object.fromEntries(
+        Object.entries(snapshot.challengeState).map(([challengeId, state]) => [
+          challengeId,
+          { interacted: state.interacted, completed: state.completed },
+        ]),
+      ),
+    },
+  })
+}
+
+function toRemoteSnapshot(state: AppState): RemoteSnapshot {
+  return {
+    username: state.username,
+    theme: state.theme,
+    language: state.language,
+    notificationsEnabled: state.notificationsEnabled,
+    aiSuggestionsEnabled: state.aiSuggestionsEnabled,
+    soundEnabled: state.soundEnabled,
+    recentSearches: state.recentSearches.map((entry) => ({
+      id: entry.id,
+      query: entry.query,
+      timestamp: entry.timestamp,
+    })),
+    chatHistory: state.chatHistory.map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      timestamp: message.timestamp,
+    })),
+    completionEntries: state.completionEntries.map((entry) => ({
+      id: entry.id,
+      completionKey: entry.completionKey,
+      question: entry.question,
+      completedAt: entry.completedAt,
+      dayKey: entry.dayKey,
+      points: entry.points,
+      sourceLabel: entry.sourceLabel,
+    })),
+    challengeState: state.challengeState,
+  }
+}
+
+function mergeAppStates(localState: AppState, remoteState: AppState): AppState {
+  if (
+    localState.recentSearches.length === 0 &&
+    localState.chatHistory.length === 0 &&
+    localState.completionEntries.length === 0 &&
+    localState.username.trim() === ''
+  ) {
+    return remoteState
+  }
+
+  const mergedSearches = dedupeById([...localState.recentSearches, ...remoteState.recentSearches]).sort(
+    (left, right) => right.timestamp - left.timestamp,
+  )
+
+  const mergedMessages = dedupeById([...localState.chatHistory, ...remoteState.chatHistory]).sort(
+    (left, right) => left.timestamp - right.timestamp,
+  )
+
+  const mergedCompletions = dedupeByCompletionKey([
+    ...localState.completionEntries,
+    ...remoteState.completionEntries,
+  ]).sort((left, right) => right.completedAt - left.completedAt)
+
+  return syncAppState({
+    ...remoteState,
+    username: localState.username.trim() || remoteState.username,
+    theme: localState.theme ?? remoteState.theme,
+    language: localState.language ?? remoteState.language,
+    notificationsEnabled: localState.notificationsEnabled,
+    aiSuggestionsEnabled: localState.aiSuggestionsEnabled,
+    soundEnabled: localState.soundEnabled,
+    recentSearches: mergedSearches,
+    chatHistory: mergedMessages,
+    completionEntries: mergedCompletions,
+    challengeState: {
+      ...remoteState.challengeState,
+      ...localState.challengeState,
+    },
+  })
+}
+
+function dedupeById<T extends { id: string }>(items: T[]) {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    if (seen.has(item.id)) {
+      return false
+    }
+    seen.add(item.id)
+    return true
+  })
+}
+
+function dedupeByCompletionKey(items: CompletionEntry[]) {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    if (seen.has(item.completionKey)) {
+      return false
+    }
+    seen.add(item.completionKey)
+    return true
+  })
+}
+
 function localeForLanguage(language: Language) {
   if (language === 'es') return 'es-ES'
   if (language === 'fr') return 'fr-FR'
