@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
+import { loadRemoteSnapshot, replaceRemoteSnapshot, resetRemoteSnapshot, type RemoteSnapshot } from './lib/supabaseAppData'
 
 type Screen = 'home' | 'homework' | 'challenges' | 'progress' | 'profile'
 type Theme = 'dark' | 'light'
@@ -100,6 +101,7 @@ type TranslationKey = keyof typeof translations.en
 type Translate = (key: TranslationKey, variables?: Record<string, string | number>) => string
 
 const APP_STATE_KEY = 'stepwise.appState.v4'
+const PROFILE_ID_KEY = 'stepwise.profileId.v1'
 const DAILY_GOAL = 5
 const DEFAULT_USERNAME = 'User'
 const MAX_RECENT_SEARCHES = 10
@@ -486,7 +488,9 @@ function getSubjects(t: Translate): SubjectDefinition[] {
 function App() {
   const [screen, setScreen] = useState<Screen>(() => readScreenFromHash())
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [profileId] = useState(() => readOrCreateProfileId())
   const [appState, setAppState] = useState<AppState>(() => readInitialAppState())
+  const [isRemoteHydrated, setIsRemoteHydrated] = useState(false)
   const [searchInput, setSearchInput] = useState('')
   const [homeNotice, setHomeNotice] = useState('')
   const [homeworkInput, setHomeworkInput] = useState('')
@@ -529,8 +533,55 @@ function App() {
   }, [state.username])
 
   useEffect(() => {
+    let cancelled = false
+
+    async function hydrateFromSupabase() {
+      try {
+        const remoteSnapshot = await loadRemoteSnapshot(profileId)
+        if (cancelled) {
+          return
+        }
+
+        let mergedState: AppState = state
+        setAppState((current) => {
+          mergedState = syncAppState(
+            mergeAppStates(current, appStateFromRemoteSnapshot(remoteSnapshot)),
+          )
+          return mergedState
+        })
+      } catch (error) {
+        console.error('Failed to hydrate from Supabase.', error)
+      } finally {
+        if (!cancelled) {
+          setIsRemoteHydrated(true)
+        }
+      }
+    }
+
+    void hydrateFromSupabase()
+
+    return () => {
+      cancelled = true
+    }
+  }, [profileId])
+
+  useEffect(() => {
     window.localStorage.setItem(APP_STATE_KEY, JSON.stringify(state))
   }, [state])
+
+  useEffect(() => {
+    if (!isRemoteHydrated) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      void replaceRemoteSnapshot(profileId, toRemoteSnapshot(state))
+    }, 250)
+
+    return () => {
+      window.clearTimeout(timeout)
+    }
+  }, [state, profileId, isRemoteHydrated])
 
   useEffect(() => {
     const nextHash = `#${screen}`
@@ -781,6 +832,7 @@ function App() {
     setQueuedLaunch(null)
     setHomeworkNotice('')
     setHomeNotice('')
+    void resetRemoteSnapshot(profileId)
   }
 
   return (
