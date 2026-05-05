@@ -170,6 +170,8 @@ const translations = {
     solverLoading: 'StepWise is working on your question...',
     solverLongWarning: 'Your question is too long. Please shorten it before sending.',
     apiError: 'The AI service is unavailable right now. Please try again in a moment.',
+    apiRateLimit:
+      'OpenAI is rate limited right now. StepWise is using local tutor mode. Check your OpenAI usage/billing or wait and try again.',
     challengesTitle: 'Practice from your active challenges.',
     challengesSubtitle: 'Open any challenge to continue and earn points.',
     progressPageTitle: 'Track every completed problem in one place.',
@@ -262,6 +264,8 @@ const translations = {
     solverLoading: 'StepWise está trabajando en tu pregunta...',
     solverLongWarning: 'Tu pregunta es demasiado larga. Acórtala antes de enviarla.',
     apiError: 'El servicio de IA no está disponible ahora mismo. Inténtalo de nuevo en un momento.',
+    apiRateLimit:
+      'OpenAI está limitado en este momento. StepWise está usando el modo tutor local. Revisa tu uso/facturación de OpenAI o espera e inténtalo de nuevo.',
     challengesTitle: 'Practica desde tus retos activos.',
     challengesSubtitle: 'Abre cualquier reto para continuar y ganar puntos.',
     progressPageTitle: 'Sigue cada problema completado en un solo lugar.',
@@ -354,6 +358,8 @@ const translations = {
     solverLoading: 'StepWise travaille sur votre question...',
     solverLongWarning: 'Votre question est trop longue. Veuillez la raccourcir.',
     apiError: 'Le service IA est indisponible pour le moment. Réessayez dans un instant.',
+    apiRateLimit:
+      'OpenAI est limité pour le moment. StepWise utilise le mode tuteur local. Vérifiez votre usage/facturation OpenAI ou attendez avant de réessayer.',
     challengesTitle: 'Travaillez depuis vos défis actifs.',
     challengesSubtitle: 'Ouvrez un défi pour continuer et gagner des points.',
     progressPageTitle: 'Suivez chaque problème terminé au même endroit.',
@@ -1586,6 +1592,7 @@ function getSectionLabels(language: Language, t: Translate) {
 const OPENAI_MISSING_KEY_MESSAGE = 'API key is missing. Please set it in .env.local'
 const OPENAI_REQUEST_FAILED_MESSAGE = 'AI request failed. Using fallback tutor mode.'
 const OPENAI_UNAVAILABLE_MESSAGE = 'AI is unavailable right now. Using fallback tutor mode.'
+const OPENAI_RATE_LIMIT_MESSAGE = 'OpenAI is rate limited right now. StepWise is using local tutor mode. Check your OpenAI usage/billing or wait and try again.'
 
 async function callOpenAI(userInput: string) {
   const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
@@ -1616,28 +1623,41 @@ RULES:
 - Keep explanations student-friendly.
 `
 
-  try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
+  const requestBody = JSON.stringify({
+    model,
+    messages: [
+      {
+        role: 'system',
+        content: SYSTEM_PROMPT,
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: 'system',
-            content: SYSTEM_PROMPT,
-          },
-          {
-            role: 'user',
-            content: userInput,
-          },
-        ],
-        temperature: 0.7,
-      }),
-    })
+      {
+        role: 'user',
+        content: userInput,
+      },
+    ],
+    temperature: 0.7,
+  })
+
+  try {
+    const makeRequest = async () =>
+      fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: requestBody,
+      })
+
+    let response = await makeRequest()
+
+    if (response.status === 429) {
+      await wait(1200)
+      response = await makeRequest()
+      if (response.status === 429) {
+        return OPENAI_RATE_LIMIT_MESSAGE
+      }
+    }
 
     if (!response.ok) {
       return OPENAI_REQUEST_FAILED_MESSAGE
@@ -1675,6 +1695,7 @@ async function requestTutorAnswer({
 
   if (
     text === OPENAI_MISSING_KEY_MESSAGE ||
+    text === OPENAI_RATE_LIMIT_MESSAGE ||
     text === OPENAI_REQUEST_FAILED_MESSAGE ||
     text === OPENAI_UNAVAILABLE_MESSAGE
   ) {
