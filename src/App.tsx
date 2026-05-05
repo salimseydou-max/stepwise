@@ -1717,12 +1717,32 @@ function buildLocalFallback(
   const solution = solveSimpleMath(activeQuestion)
   if (!solution) {
     const normalized = activeQuestion.toLowerCase()
+    const definitionTerm = extractDefinitionTerm(activeQuestion)
+
+    if (definitionTerm) {
+      const definition = lookupDefinition(definitionTerm, language)
+
+      return [
+        `${t('chatExplanation')}:`,
+        usePreviousQuestion ? phrases.followUpExplanation : phrases.definitionExplanation,
+        usePreviousQuestion && previousUserMessage ? `${phrases.followUp} ${previousUserMessage.text}` : '',
+        definition.context ? `${phrases.assumptionPrefix} "${definition.context}".` : '',
+        '',
+        `${t('chatSteps')}:`,
+        ...phrases.definitionSteps.map((step, index) => `${index + 1}. ${step}`),
+        '',
+        `${t('chatFinal')}:`,
+        definition.answer,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    }
 
     const topic = /(essay|paragraph|theme|thesis|reading|book|poem|summary|character)/i.test(normalized)
       ? 'writing'
       : /(history|war|revolution|government|civilization|president|empire)/i.test(normalized)
         ? 'history'
-        : /(math|algebra|geometry|equation|fraction|calculate|solve|physics|chemistry|biology|science|cell|force|energy|graph)/i.test(
+        : /(math|algebra|geometry|equation|fraction|calculate|solve|physics|chemistry|biology|science|cell|force|energy|graph|english|grammar|language|literature|vocabulary)/i.test(
               normalized,
             )
           ? 'stem'
@@ -1789,6 +1809,13 @@ const localTutorPhrases = {
     followUp: 'I also considered your earlier question:',
     followUpExplanation:
       'You asked for a direct follow-up answer, so I used the previous homework question as the context for this response.',
+    definitionExplanation:
+      'This looks like a definition question, so the best answer is a direct meaning written in simple student-friendly language.',
+    definitionSteps: [
+      'Identify the word or concept being defined.',
+      'Give the plain meaning in simple language.',
+      'Add a short detail so the definition is easier to remember.',
+    ],
     followUpMathExplanation:
       'You asked for only the answer, so I used your previous math question and solved it directly.',
     followUpMathStepOne: 'Use the previous expression:',
@@ -1836,6 +1863,13 @@ const localTutorPhrases = {
     followUp: 'También tuve en cuenta tu pregunta anterior:',
     followUpExplanation:
       'Pediste una respuesta directa de seguimiento, así que usé la pregunta anterior como contexto para responder.',
+    definitionExplanation:
+      'Parece una pregunta de definición, así que la mejor respuesta es dar el significado de forma directa y fácil de entender.',
+    definitionSteps: [
+      'Identifica la palabra o el concepto que se debe definir.',
+      'Da el significado con palabras simples.',
+      'Añade un detalle corto para que sea más fácil recordarlo.',
+    ],
     followUpMathExplanation:
       'Pediste solo la respuesta, así que usé tu pregunta anterior de matemáticas y la resolví directamente.',
     followUpMathStepOne: 'Usa la expresión anterior:',
@@ -1883,6 +1917,13 @@ const localTutorPhrases = {
     followUp: 'J’ai aussi pris en compte votre question précédente :',
     followUpExplanation:
       'Vous avez demandé une réponse directe de suivi, donc j’ai utilisé la question précédente comme contexte pour répondre.',
+    definitionExplanation:
+      'Cela ressemble à une question de définition, donc la meilleure réponse est de donner le sens directement avec des mots simples.',
+    definitionSteps: [
+      'Identifiez le mot ou le concept à définir.',
+      'Donnez le sens avec des mots simples.',
+      'Ajoutez un détail court pour mieux retenir la définition.',
+    ],
     followUpMathExplanation:
       'Vous vouliez seulement la réponse, donc j’ai repris votre question précédente de maths et je l’ai résolue directement.',
     followUpMathStepOne: 'Utilisez l’expression précédente :',
@@ -1936,6 +1977,83 @@ function shouldUsePreviousQuestion(currentQuestion: string, previousQuestion?: s
   return /(just\s*(want|need)?\s*(the)?\s*answer|just\s*(want|need)?\s*(the)?\s*ans|only\s*(the)?\s*answer|answer\s*only|give me (just )?the answer|what'?s the answer|i just ant the ans|just ant the ans)/i.test(
     normalized,
   )
+}
+
+function extractDefinitionTerm(input: string) {
+  const normalized = input
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const patterns = [
+    /^(?:hey\s+)?(?:w+hat|hat|what)\s+is\s+(.+)$/,
+    /^what\s+does\s+(.+)\s+mean$/,
+    /^meaning\s+of\s+(.+)$/,
+    /^define\s+(.+)$/,
+  ]
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern)
+    if (match?.[1]) {
+      return match[1].trim()
+    }
+  }
+
+  return null
+}
+
+function lookupDefinition(term: string, language: Language) {
+  const cleanedTerm = term.replace(/\b(an|a|the)\b/g, '').trim()
+  const key = cleanedTerm.toLowerCase()
+
+  const definitions = {
+    english: {
+      en: 'English is a language and also a school subject that focuses on reading, writing, grammar, vocabulary, and literature.',
+      es: 'El inglés es un idioma y también una materia escolar que se centra en lectura, escritura, gramática, vocabulario y literatura.',
+      fr: "L'anglais est une langue et aussi une matière scolaire qui porte sur la lecture, l'écriture, la grammaire, le vocabulaire et la littérature.",
+    },
+    blood: {
+      en: 'Blood is the red liquid in the body that carries oxygen, nutrients, and waste materials to and from different parts of the body.',
+      es: 'La sangre es el líquido rojo del cuerpo que transporta oxígeno, nutrientes y desechos hacia y desde las diferentes partes del cuerpo.',
+      fr: 'Le sang est le liquide rouge du corps qui transporte l’oxygène, les nutriments et les déchets vers et depuis les différentes parties du corps.',
+    },
+    photosynthesis: {
+      en: 'Photosynthesis is the process plants use to make food from sunlight, water, and carbon dioxide.',
+      es: 'La fotosíntesis es el proceso que usan las plantas para producir alimento a partir de la luz solar, el agua y el dióxido de carbono.',
+      fr: 'La photosynthèse est le processus par lequel les plantes fabriquent leur nourriture à partir de la lumière du soleil, de l’eau et du dioxyde de carbone.',
+    },
+    democracy: {
+      en: 'Democracy is a system of government in which the people choose their leaders, usually by voting.',
+      es: 'La democracia es un sistema de gobierno en el que las personas eligen a sus líderes, normalmente mediante votación.',
+      fr: 'La démocratie est un système de gouvernement dans lequel le peuple choisit ses dirigeants, généralement par le vote.',
+    },
+  } as const
+
+  const directMatch = definitions[key as keyof typeof definitions]
+  if (directMatch) {
+    return {
+      answer: directMatch[language],
+      context: cleanedTerm,
+    }
+  }
+
+  const capitalizedTerm = cleanedTerm
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+
+  const genericAnswers = {
+    en: `${capitalizedTerm} is the term or concept your question is asking about. In simple words, it refers to the main idea or meaning of "${cleanedTerm}".`,
+    es: `${capitalizedTerm} es el término o concepto por el que pregunta tu ejercicio. En palabras simples, se refiere a la idea principal o al significado de "${cleanedTerm}".`,
+    fr: `${capitalizedTerm} est le terme ou le concept visé par votre question. En mots simples, cela correspond à l’idée principale ou au sens de "${cleanedTerm}".`,
+  }
+
+  return {
+    answer: genericAnswers[language],
+    context: cleanedTerm,
+  }
 }
 
 function solveSimpleMath(input: string) {
