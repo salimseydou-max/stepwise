@@ -1671,13 +1671,15 @@ function buildLocalFallback(
   t: Translate,
   history: ChatMessage[],
 ) {
-  const solution = solveSimpleMath(question)
+  const phrases = localTutorPhrases[language]
+  const previousUserMessage = [...history]
+    .reverse()
+    .find((message) => message.role === 'user' && message.text !== question)
+  const usePreviousQuestion = shouldUsePreviousQuestion(question, previousUserMessage?.text)
+  const activeQuestion = usePreviousQuestion && previousUserMessage ? previousUserMessage.text : question
+  const solution = solveSimpleMath(activeQuestion)
   if (!solution) {
-    const phrases = localTutorPhrases[language]
-    const normalized = question.toLowerCase()
-    const previousUserMessage = [...history]
-      .reverse()
-      .find((message) => message.role === 'user' && message.text !== question)
+    const normalized = activeQuestion.toLowerCase()
 
     const topic = /(essay|paragraph|theme|thesis|reading|book|poem|summary|character)/i.test(normalized)
       ? 'writing'
@@ -1716,9 +1718,9 @@ function buildLocalFallback(
 
     return [
       `${t('chatExplanation')}:`,
-      selected.explanation,
+      usePreviousQuestion ? phrases.followUpExplanation : selected.explanation,
       previousUserMessage ? `${phrases.followUp} ${previousUserMessage.text}` : '',
-      `${phrases.assumptionPrefix} "${question.trim()}".`,
+      `${phrases.assumptionPrefix} "${activeQuestion.trim()}".`,
       '',
       `${t('chatSteps')}:`,
       ...selected.steps.map((step, index) => `${index + 1}. ${step}`),
@@ -1732,14 +1734,15 @@ function buildLocalFallback(
 
   return [
     `${t('chatExplanation')}:`,
-    t('mathFallbackExplanation'),
+    usePreviousQuestion ? phrases.followUpMathExplanation : t('mathFallbackExplanation'),
+    usePreviousQuestion && previousUserMessage ? `${phrases.followUp} ${previousUserMessage.text}` : '',
     '',
     `${t('chatSteps')}:`,
-    `1. ${t('mathFallbackStepOne')} ${solution.expression}`,
-    `2. ${t('mathFallbackStepTwo')}`,
+    `1. ${usePreviousQuestion ? phrases.followUpMathStepOne : t('mathFallbackStepOne')} ${solution.expression}`,
+    `2. ${usePreviousQuestion ? phrases.followUpMathStepTwo : t('mathFallbackStepTwo')}`,
     '',
     `${t('chatFinal')}:`,
-    `${solution.result}`,
+    `${usePreviousQuestion ? phrases.followUpMathFinal : ''}${solution.result}`,
   ].join('\n')
 }
 
@@ -1747,6 +1750,13 @@ const localTutorPhrases = {
   en: {
     assumptionPrefix: 'I am making a reasonable tutoring assumption based on',
     followUp: 'I also considered your earlier question:',
+    followUpExplanation:
+      'You asked for a direct follow-up answer, so I used the previous homework question as the context for this response.',
+    followUpMathExplanation:
+      'You asked for only the answer, so I used your previous math question and solved it directly.',
+    followUpMathStepOne: 'Use the previous expression:',
+    followUpMathStepTwo: 'Evaluate the arithmetic carefully to get the final total.',
+    followUpMathFinal: 'The answer is ',
     stemExplanation:
       'This looks like a STEM homework question, so the safest way forward is to identify what is known, choose the correct formula or concept, and solve in a clear order.',
     stemSteps: [
@@ -1787,6 +1797,13 @@ const localTutorPhrases = {
   es: {
     assumptionPrefix: 'Estoy haciendo una suposición razonable de tutoría basada en',
     followUp: 'También tuve en cuenta tu pregunta anterior:',
+    followUpExplanation:
+      'Pediste una respuesta directa de seguimiento, así que usé la pregunta anterior como contexto para responder.',
+    followUpMathExplanation:
+      'Pediste solo la respuesta, así que usé tu pregunta anterior de matemáticas y la resolví directamente.',
+    followUpMathStepOne: 'Usa la expresión anterior:',
+    followUpMathStepTwo: 'Evalúa la operación con cuidado para obtener el resultado final.',
+    followUpMathFinal: 'La respuesta es ',
     stemExplanation:
       'Parece una pregunta de ciencias o matemáticas, así que lo más seguro es identificar lo conocido, elegir la fórmula o el concepto correcto y resolver con un orden claro.',
     stemSteps: [
@@ -1827,6 +1844,13 @@ const localTutorPhrases = {
   fr: {
     assumptionPrefix: 'Je fais une hypothèse raisonnable de tutorat à partir de',
     followUp: 'J’ai aussi pris en compte votre question précédente :',
+    followUpExplanation:
+      'Vous avez demandé une réponse directe de suivi, donc j’ai utilisé la question précédente comme contexte pour répondre.',
+    followUpMathExplanation:
+      'Vous vouliez seulement la réponse, donc j’ai repris votre question précédente de maths et je l’ai résolue directement.',
+    followUpMathStepOne: 'Utilisez l’expression précédente :',
+    followUpMathStepTwo: 'Évaluez soigneusement l’opération pour obtenir le résultat final.',
+    followUpMathFinal: 'La réponse est ',
     stemExplanation:
       'Cela ressemble à une question de maths ou de sciences. Le plus fiable est donc d’identifier les données connues, de choisir la bonne formule ou le bon concept, puis de résoudre dans un ordre clair.',
     stemSteps: [
@@ -1866,6 +1890,17 @@ const localTutorPhrases = {
   },
 } as const
 
+function shouldUsePreviousQuestion(currentQuestion: string, previousQuestion?: string) {
+  if (!previousQuestion) {
+    return false
+  }
+
+  const normalized = currentQuestion.toLowerCase().trim()
+  return /(just\s*(want|need)?\s*(the)?\s*answer|just\s*(want|need)?\s*(the)?\s*ans|only\s*(the)?\s*answer|answer\s*only|give me (just )?the answer|what'?s the answer|i just ant the ans|just ant the ans)/i.test(
+    normalized,
+  )
+}
+
 function solveSimpleMath(input: string) {
   const cleaned = input
     .toLowerCase()
@@ -1873,11 +1908,11 @@ function solveSimpleMath(input: string) {
     .replace(/÷/g, '/')
     .replace(/,/g, '.')
     .replace(/\^/g, '**')
-    .replace(/what is|what's|calculate|solve|please|can you solve|cu[aá]nto es|calcula|resuelve|combien fait|calcule|résous|quel est/gi, ' ')
-    .replace(/[=?]/g, ' ')
+    .replace(/[^0-9+\-*/().\s]/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim()
 
-  if (!cleaned || !/^[\d\s+\-*/().*]+$/.test(cleaned) || /\*{3,}/.test(cleaned)) {
+  if (!cleaned || !/[+\-*/]/.test(cleaned) || !/^[\d\s+\-*/().*]+$/.test(cleaned) || /\*{3,}/.test(cleaned)) {
     return null
   }
 
