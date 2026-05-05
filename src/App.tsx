@@ -1583,6 +1583,81 @@ function getSectionLabels(language: Language, t: Translate) {
   }
 }
 
+const OPENAI_MISSING_KEY_MESSAGE = 'API key is missing. Please set it in .env.local'
+const OPENAI_REQUEST_FAILED_MESSAGE = 'AI request failed. Using fallback tutor mode.'
+const OPENAI_UNAVAILABLE_MESSAGE = 'AI is unavailable right now. Using fallback tutor mode.'
+
+async function callOpenAI(userInput: string) {
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
+  const baseUrl = import.meta.env.VITE_OPENAI_BASE_URL as string | undefined
+  const model = import.meta.env.VITE_OPENAI_MODEL as string | undefined
+
+  if (!apiKey) {
+    return OPENAI_MISSING_KEY_MESSAGE
+  }
+
+  const SYSTEM_PROMPT = `
+You are StepWise, an advanced AI homework tutor.
+
+Your job is to teach clearly, not just give answers.
+
+RULES:
+- Always respond in a structured format:
+  1. Simple Explanation
+  2. Step-by-Step Breakdown
+  3. Final Answer
+  4. Quick Tip (optional)
+
+- Be clear, direct, and easy to understand.
+- Never be vague or overly general.
+- For non-math questions, still break down the reasoning step-by-step.
+- If something is missing, make a reasonable assumption and clearly state it.
+- Do NOT refuse normal school questions.
+- Keep explanations student-friendly.
+`
+
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: SYSTEM_PROMPT,
+          },
+          {
+            role: 'user',
+            content: userInput,
+          },
+        ],
+        temperature: 0.7,
+      }),
+    })
+
+    if (!response.ok) {
+      return OPENAI_REQUEST_FAILED_MESSAGE
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{
+        message?: {
+          content?: string
+        }
+      }>
+    }
+
+    return data?.choices?.[0]?.message?.content || 'No response received.'
+  } catch (error) {
+    console.error(error)
+    return OPENAI_UNAVAILABLE_MESSAGE
+  }
+}
+
 async function requestTutorAnswer({
   history,
   labels,
@@ -1590,59 +1665,21 @@ async function requestTutorAnswer({
   history: ChatMessage[]
   labels: { explanation: string; steps: string; final: string; languageName: string }
 }) {
-  if (!OPENAI_API_KEY) {
-    throw new Error('Missing API key')
+  const userInput = [...history].reverse().find((message) => message.role === 'user')?.text?.trim() ?? ''
+
+  if (!userInput) {
+    throw new Error('Missing user input')
   }
 
-  const systemPrompt = [
-    'You are an AI tutor. Always:',
-    '- Answer the question',
-    '- Explain clearly',
-    '- Show steps',
-    '- Give final answer',
-    '',
-    "Never refuse simple questions like '1+1'.",
-    'If unclear, make a reasonable assumption.',
-    '',
-    `Respond in ${labels.languageName}.`,
-    `Use exactly this structure: ${labels.explanation}: ... ${labels.steps}: ... ${labels.final}: ...`,
-  ].join('\n')
+  const text = (await callOpenAI(userInput)).trim()
 
-  const response = await fetch(`${OPENAI_BASE_URL.replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      temperature: 0.4,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...history.slice(-MAX_CHAT_CONTEXT).map((message) => ({
-          role: message.role,
-          content: message.text,
-        })),
-      ],
-    }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`API request failed with ${response.status}`)
+  if (
+    text === OPENAI_MISSING_KEY_MESSAGE ||
+    text === OPENAI_REQUEST_FAILED_MESSAGE ||
+    text === OPENAI_UNAVAILABLE_MESSAGE
+  ) {
+    throw new Error(text)
   }
-
-  const data = (await response.json()) as {
-    choices?: Array<{
-      message?: {
-        content?: string | Array<{ type?: string; text?: string }>
-      }
-    }>
-  }
-
-  const content = data.choices?.[0]?.message?.content
-  const text = Array.isArray(content)
-    ? content.map((item) => item.text ?? '').join('').trim()
-    : String(content ?? '').trim()
 
   if (!text) {
     throw new Error('Missing assistant content')
