@@ -186,9 +186,9 @@ const translations = {
     solverEmpty: 'Your homework conversation will appear here.',
     solverLoading: 'StepWise is working on your question...',
     solverLongWarning: 'Your question is too long. Please shorten it before sending.',
-    apiError: 'The AI service is unavailable right now. Please try again in a moment.',
+    apiError: 'OpenRouter is unavailable right now. Please try again in a moment.',
     apiRateLimit:
-      'OpenRouter is rate limited right now. StepWise is using local tutor mode. Check your OpenRouter usage or wait and try again.',
+      'OpenRouter is rate limited right now. Check your OpenRouter usage or wait a moment before trying again.',
     challengesTitle: 'Practice from your active challenges.',
     challengesSubtitle: 'Open any challenge to continue and earn points.',
     progressPageTitle: 'Track every completed problem in one place.',
@@ -280,9 +280,9 @@ const translations = {
     solverEmpty: 'Tu conversación de tarea aparecerá aquí.',
     solverLoading: 'StepWise está trabajando en tu pregunta...',
     solverLongWarning: 'Tu pregunta es demasiado larga. Acórtala antes de enviarla.',
-    apiError: 'El servicio de IA no está disponible ahora mismo. Inténtalo de nuevo en un momento.',
+    apiError: 'OpenRouter no está disponible ahora mismo. Inténtalo de nuevo en un momento.',
     apiRateLimit:
-      'OpenRouter está limitado en este momento. StepWise está usando el modo tutor local. Revisa tu uso de OpenRouter o espera e inténtalo de nuevo.',
+      'OpenRouter está limitado en este momento. Revisa tu uso de OpenRouter o espera un momento antes de intentarlo de nuevo.',
     challengesTitle: 'Practica desde tus retos activos.',
     challengesSubtitle: 'Abre cualquier reto para continuar y ganar puntos.',
     progressPageTitle: 'Sigue cada problema completado en un solo lugar.',
@@ -374,9 +374,9 @@ const translations = {
     solverEmpty: 'Votre conversation de devoirs apparaîtra ici.',
     solverLoading: 'StepWise travaille sur votre question...',
     solverLongWarning: 'Votre question est trop longue. Veuillez la raccourcir.',
-    apiError: 'Le service IA est indisponible pour le moment. Réessayez dans un instant.',
+    apiError: 'OpenRouter est indisponible pour le moment. Réessayez dans un instant.',
     apiRateLimit:
-      'OpenRouter est limité pour le moment. StepWise utilise le mode tuteur local. Vérifiez votre usage OpenRouter ou attendez avant de réessayer.',
+      'OpenRouter est limité pour le moment. Vérifiez votre usage OpenRouter ou attendez un instant avant de réessayer.',
     challengesTitle: 'Travaillez depuis vos défis actifs.',
     challengesSubtitle: 'Ouvrez un défi pour continuer et gagner des points.',
     progressPageTitle: 'Suivez chaque problème terminé au même endroit.',
@@ -769,12 +769,13 @@ function App() {
       }))
 
       registerSolvedQuestion(userMessage.id, cleaned, launch)
-    } catch {
-      const fallbackText = buildLocalFallback(cleaned, state.language, t, historySnapshot)
+    } catch (error) {
+      const errorText = getTutorErrorMessage(error, t)
+      setHomeworkNotice(errorText)
       const assistantMessage: ChatMessage = {
         id: createId(),
         role: 'assistant',
-        text: fallbackText,
+        text: errorText,
         timestamp: Date.now(),
       }
 
@@ -782,8 +783,6 @@ function App() {
         ...current,
         chatHistory: [...current.chatHistory, assistantMessage],
       }))
-
-      registerSolvedQuestion(userMessage.id, cleaned, launch)
     } finally {
       setIsLoading(false)
     }
@@ -1614,9 +1613,9 @@ function getSectionLabels(language: Language, t: Translate) {
 }
 
 const OPENAI_MISSING_KEY_MESSAGE = 'OpenRouter API key is missing. Please set it in .env.local'
-const OPENAI_REQUEST_FAILED_MESSAGE = 'OpenRouter request failed. Using fallback tutor mode.'
-const OPENAI_UNAVAILABLE_MESSAGE = 'OpenRouter is unavailable right now. Using fallback tutor mode.'
-const OPENAI_RATE_LIMIT_MESSAGE = 'OpenRouter is rate limited right now. StepWise is using local tutor mode. Check your OpenRouter usage or wait and try again.'
+const OPENAI_REQUEST_FAILED_MESSAGE = 'OpenRouter request failed.'
+const OPENAI_UNAVAILABLE_MESSAGE = 'OpenRouter is unavailable right now.'
+const OPENAI_RATE_LIMIT_MESSAGE = 'OpenRouter is rate limited right now.'
 
 async function callOpenAI(history: ChatMessage[], languageName: string, preferDirectAnswer: boolean) {
   if (!OPENROUTER_API_KEY) {
@@ -1736,10 +1735,6 @@ async function requestTutorAnswer({
   }
 
   const directAnswerPreference = getDirectAnswerPreference(userInput, previousUserMessage?.text, language)
-
-  if (directAnswerPreference.localDirectAnswer) {
-    return directAnswerPreference.localDirectAnswer
-  }
 
   const scopedHistory =
     directAnswerPreference.preferDirectAnswer &&
@@ -2090,7 +2085,7 @@ function shouldRespondDirectly(currentQuestion: string, previousQuestion?: strin
 function getDirectAnswerPreference(
   currentQuestion: string,
   previousQuestion: string | undefined,
-  language: Language,
+  _language: Language,
 ) {
   const usePreviousQuestion = shouldUsePreviousQuestion(currentQuestion, previousQuestion)
   const activeQuestion = usePreviousQuestion && previousQuestion ? previousQuestion : currentQuestion
@@ -2111,19 +2106,17 @@ function getDirectAnswerPreference(
       usePreviousQuestion,
       activeQuestion,
       preferDirectAnswer: true,
-      localDirectAnswer: String(mathSolution.result),
+      localDirectAnswer: null as string | null,
     }
   }
 
   const definitionTerm = extractDefinitionTerm(trimmed)
   if (definitionTerm) {
-    const definition = lookupDefinition(definitionTerm, language)
-
     return {
       usePreviousQuestion,
       activeQuestion,
       preferDirectAnswer: true,
-      localDirectAnswer: definition.isKnown ? definition.answer : null,
+      localDirectAnswer: null as string | null,
     }
   }
 
@@ -2158,6 +2151,20 @@ function extractDirectAnswer(
     .replace(/^\s*[-*]\s*/gm, '')
     .replace(/```[\s\S]*?```/g, '')
     .trim()
+}
+
+function getTutorErrorMessage(error: unknown, t: Translate) {
+  if (error instanceof Error) {
+    if (error.message === OPENAI_RATE_LIMIT_MESSAGE) {
+      return t('apiRateLimit')
+    }
+
+    if (error.message === OPENAI_MISSING_KEY_MESSAGE) {
+      return OPENAI_MISSING_KEY_MESSAGE
+    }
+  }
+
+  return t('apiError')
 }
 
 function escapeRegExp(value: string) {
