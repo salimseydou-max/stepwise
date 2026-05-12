@@ -1810,8 +1810,12 @@ function buildLocalFallback(
     if (definitionTerm) {
       const definition = lookupDefinition(definitionTerm, language)
 
-      if (preferDirectAnswer) {
+      if (preferDirectAnswer && definition.isKnown) {
         return definition.answer
+      }
+
+      if (!definition.isKnown) {
+        return buildUnknownDefinitionFallback(definitionTerm, language)
       }
 
       return [
@@ -2113,11 +2117,13 @@ function getDirectAnswerPreference(
 
   const definitionTerm = extractDefinitionTerm(trimmed)
   if (definitionTerm) {
+    const definition = lookupDefinition(definitionTerm, language)
+
     return {
       usePreviousQuestion,
       activeQuestion,
       preferDirectAnswer: true,
-      localDirectAnswer: lookupDefinition(definitionTerm, language).answer,
+      localDirectAnswer: definition.isKnown ? definition.answer : null,
     }
   }
 
@@ -2242,25 +2248,27 @@ function lookupDefinition(term: string, language: Language) {
     return {
       answer: directMatch[language],
       context: cleanedTerm,
+      isKnown: true,
     }
   }
 
-  const capitalizedTerm = cleanedTerm
-    .split(' ')
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
-
-  const genericAnswers = {
-    en: `${capitalizedTerm} is the term or concept your question is asking about. In simple words, it refers to the main idea or meaning of "${cleanedTerm}".`,
-    es: `${capitalizedTerm} es el término o concepto por el que pregunta tu ejercicio. En palabras simples, se refiere a la idea principal o al significado de "${cleanedTerm}".`,
-    fr: `${capitalizedTerm} est le terme ou le concept visé par votre question. En mots simples, cela correspond à l’idée principale ou au sens de "${cleanedTerm}".`,
-  }
-
   return {
-    answer: genericAnswers[language],
+    answer: buildUnknownDefinitionFallback(cleanedTerm, language),
     context: cleanedTerm,
+    isKnown: false,
   }
+}
+
+function buildUnknownDefinitionFallback(term: string, language: Language) {
+  const cleanedTerm = term.trim()
+
+  const messages = {
+    en: `I do not have a saved local definition for "${cleanedTerm}" right now. Please try again in a moment so StepWise can fetch a live answer.`,
+    es: `No tengo una definición local guardada para "${cleanedTerm}" en este momento. Inténtalo de nuevo en un momento para que StepWise pueda obtener una respuesta en vivo.`,
+    fr: `Je n’ai pas de définition locale enregistrée pour "${cleanedTerm}" pour le moment. Réessayez dans un instant pour que StepWise puisse récupérer une réponse en direct.`,
+  } as const
+
+  return messages[language]
 }
 
 function solveSimpleMath(input: string) {
