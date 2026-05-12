@@ -106,9 +106,26 @@ const DAILY_GOAL = 5
 const DEFAULT_USERNAME = 'User'
 const MAX_RECENT_SEARCHES = 10
 const MAX_CHAT_CONTEXT = 12
-const OPENAI_BASE_URL = (import.meta.env.VITE_OPENAI_BASE_URL as string | undefined)?.trim() || 'https://api.openai.com/v1'
-const OPENAI_API_KEY = (import.meta.env.VITE_OPENAI_API_KEY as string | undefined)?.trim() || ''
-const OPENAI_MODEL = (import.meta.env.VITE_OPENAI_MODEL as string | undefined)?.trim() || 'gpt-4o-mini'
+const OPENROUTER_BASE_URL =
+  (import.meta.env.VITE_OPENROUTER_BASE_URL as string | undefined)?.trim() ||
+  (import.meta.env.VITE_OPENAI_BASE_URL as string | undefined)?.trim() ||
+  'https://openrouter.ai/api/v1'
+const OPENROUTER_API_KEY =
+  (import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined)?.trim() ||
+  (import.meta.env.VITE_OPENAI_API_KEY as string | undefined)?.trim() ||
+  ''
+const OPENROUTER_MODEL =
+  (import.meta.env.VITE_OPENROUTER_MODEL as string | undefined)?.trim() ||
+  (import.meta.env.VITE_OPENAI_MODEL as string | undefined)?.trim() ||
+  'openai/gpt-4o-mini'
+const OPENROUTER_APP_URL =
+  (import.meta.env.VITE_OPENROUTER_APP_URL as string | undefined)?.trim() ||
+  (import.meta.env.VITE_APP_URL as string | undefined)?.trim() ||
+  'https://stepwise.local'
+const OPENROUTER_APP_NAME =
+  (import.meta.env.VITE_OPENROUTER_APP_NAME as string | undefined)?.trim() ||
+  (import.meta.env.VITE_APP_NAME as string | undefined)?.trim() ||
+  'StepWise'
 
 const initialChallengeState: ChallengeState = {
   'daily-math': { interacted: false, completed: false },
@@ -171,7 +188,7 @@ const translations = {
     solverLongWarning: 'Your question is too long. Please shorten it before sending.',
     apiError: 'The AI service is unavailable right now. Please try again in a moment.',
     apiRateLimit:
-      'OpenAI is rate limited right now. StepWise is using local tutor mode. Check your OpenAI usage/billing or wait and try again.',
+      'OpenRouter is rate limited right now. StepWise is using local tutor mode. Check your OpenRouter usage or wait and try again.',
     challengesTitle: 'Practice from your active challenges.',
     challengesSubtitle: 'Open any challenge to continue and earn points.',
     progressPageTitle: 'Track every completed problem in one place.',
@@ -265,7 +282,7 @@ const translations = {
     solverLongWarning: 'Tu pregunta es demasiado larga. Acórtala antes de enviarla.',
     apiError: 'El servicio de IA no está disponible ahora mismo. Inténtalo de nuevo en un momento.',
     apiRateLimit:
-      'OpenAI está limitado en este momento. StepWise está usando el modo tutor local. Revisa tu uso/facturación de OpenAI o espera e inténtalo de nuevo.',
+      'OpenRouter está limitado en este momento. StepWise está usando el modo tutor local. Revisa tu uso de OpenRouter o espera e inténtalo de nuevo.',
     challengesTitle: 'Practica desde tus retos activos.',
     challengesSubtitle: 'Abre cualquier reto para continuar y ganar puntos.',
     progressPageTitle: 'Sigue cada problema completado en un solo lugar.',
@@ -359,7 +376,7 @@ const translations = {
     solverLongWarning: 'Votre question est trop longue. Veuillez la raccourcir.',
     apiError: 'Le service IA est indisponible pour le moment. Réessayez dans un instant.',
     apiRateLimit:
-      'OpenAI est limité pour le moment. StepWise utilise le mode tuteur local. Vérifiez votre usage/facturation OpenAI ou attendez avant de réessayer.',
+      'OpenRouter est limité pour le moment. StepWise utilise le mode tuteur local. Vérifiez votre usage OpenRouter ou attendez avant de réessayer.',
     challengesTitle: 'Travaillez depuis vos défis actifs.',
     challengesSubtitle: 'Ouvrez un défi pour continuer et gagner des points.',
     progressPageTitle: 'Suivez chaque problème terminé au même endroit.',
@@ -1589,19 +1606,23 @@ function getSectionLabels(language: Language, t: Translate) {
   }
 }
 
-const OPENAI_MISSING_KEY_MESSAGE = 'API key is missing. Please set it in .env.local'
-const OPENAI_REQUEST_FAILED_MESSAGE = 'AI request failed. Using fallback tutor mode.'
-const OPENAI_UNAVAILABLE_MESSAGE = 'AI is unavailable right now. Using fallback tutor mode.'
-const OPENAI_RATE_LIMIT_MESSAGE = 'OpenAI is rate limited right now. StepWise is using local tutor mode. Check your OpenAI usage/billing or wait and try again.'
+const OPENAI_MISSING_KEY_MESSAGE = 'OpenRouter API key is missing. Please set it in .env.local'
+const OPENAI_REQUEST_FAILED_MESSAGE = 'OpenRouter request failed. Using fallback tutor mode.'
+const OPENAI_UNAVAILABLE_MESSAGE = 'OpenRouter is unavailable right now. Using fallback tutor mode.'
+const OPENAI_RATE_LIMIT_MESSAGE = 'OpenRouter is rate limited right now. StepWise is using local tutor mode. Check your OpenRouter usage or wait and try again.'
 
-async function callOpenAI(userInput: string) {
-  const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
-  const baseUrl = import.meta.env.VITE_OPENAI_BASE_URL as string | undefined
-  const model = import.meta.env.VITE_OPENAI_MODEL as string | undefined
-
-  if (!apiKey) {
+async function callOpenAI(history: ChatMessage[], languageName: string) {
+  if (!OPENROUTER_API_KEY) {
     return OPENAI_MISSING_KEY_MESSAGE
   }
+
+  const contextMessages = history
+    .filter((message) => message.role === 'user' || message.role === 'assistant')
+    .slice(-MAX_CHAT_CONTEXT)
+    .map((message) => ({
+      role: message.role,
+      content: message.text,
+    }))
 
   const SYSTEM_PROMPT = `
 You are StepWise, an advanced AI homework tutor.
@@ -1621,30 +1642,30 @@ RULES:
 - If something is missing, make a reasonable assumption and clearly state it.
 - Do NOT refuse normal school questions.
 - Keep explanations student-friendly.
+- Respond in ${languageName} unless the student's question clearly asks for another language.
 `
 
   const requestBody = JSON.stringify({
-    model,
+    model: OPENROUTER_MODEL,
     messages: [
       {
         role: 'system',
         content: SYSTEM_PROMPT,
       },
-      {
-        role: 'user',
-        content: userInput,
-      },
+      ...contextMessages,
     ],
     temperature: 0.7,
   })
 
   try {
     const makeRequest = async () =>
-      fetch(`${baseUrl}/chat/completions`, {
+      fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+          'HTTP-Referer': OPENROUTER_APP_URL,
+          'X-Title': OPENROUTER_APP_NAME,
         },
         body: requestBody,
       })
@@ -1660,6 +1681,15 @@ RULES:
     }
 
     if (!response.ok) {
+      try {
+        const errorData = (await response.json()) as {
+          error?: { message?: string }
+          message?: string
+        }
+        console.error('OpenRouter request failed', response.status, errorData?.error?.message || errorData?.message || '')
+      } catch {
+        console.error('OpenRouter request failed', response.status)
+      }
       return OPENAI_REQUEST_FAILED_MESSAGE
     }
 
@@ -1691,7 +1721,7 @@ async function requestTutorAnswer({
     throw new Error('Missing user input')
   }
 
-  const text = (await callOpenAI(userInput)).trim()
+  const text = (await callOpenAI(history, labels.languageName)).trim()
 
   if (
     text === OPENAI_MISSING_KEY_MESSAGE ||

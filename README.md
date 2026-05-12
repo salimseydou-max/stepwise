@@ -18,6 +18,18 @@ npm install
 npm run dev
 ```
 
+## OpenRouter environment
+
+Create `.env.local` in the project root with:
+
+```bash
+VITE_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+VITE_OPENROUTER_API_KEY=your-openrouter-api-key
+VITE_OPENROUTER_MODEL=openai/gpt-4o-mini
+VITE_OPENROUTER_APP_NAME=StepWise
+VITE_OPENROUTER_APP_URL=http://localhost:5173
+```
+
 ## Build
 
 ```bash

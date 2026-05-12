@@ -16,9 +16,11 @@ Create or update `.env.local` in the project root with:
 ```bash
 VITE_SUPABASE_URL=https://pygboftphzagwyofwrak.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
-VITE_OPENAI_BASE_URL=https://api.openai.com/v1
-VITE_OPENAI_API_KEY=your-openai-api-key
-VITE_OPENAI_MODEL=gpt-4o-mini
+VITE_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+VITE_OPENROUTER_API_KEY=your-openrouter-api-key
+VITE_OPENROUTER_MODEL=openai/gpt-4o-mini
+VITE_OPENROUTER_APP_NAME=StepWise
+VITE_OPENROUTER_APP_URL=http://localhost:5173
 ```
 
 ## 3. Start the app
