@@ -753,6 +753,7 @@ function App() {
       const assistantText = await requestTutorAnswer({
         history: historySnapshot,
         labels: getSectionLabels(state.language, t),
+        language: state.language,
       })
 
       const assistantMessage: ChatMessage = {
@@ -1719,9 +1720,11 @@ RULES:
 async function requestTutorAnswer({
   history,
   labels,
+  language,
 }: {
   history: ChatMessage[]
   labels: { explanation: string; steps: string; final: string; languageName: string }
+  language: Language
 }) {
   const userInput = [...history].reverse().find((message) => message.role === 'user')?.text?.trim() ?? ''
   const previousUserMessage = [...history]
@@ -1732,8 +1735,19 @@ async function requestTutorAnswer({
     throw new Error('Missing user input')
   }
 
-  const preferDirectAnswer = shouldRespondDirectly(userInput, previousUserMessage?.text)
-  const text = (await callOpenAI(history, labels.languageName, preferDirectAnswer)).trim()
+  const directAnswerPreference = getDirectAnswerPreference(userInput, previousUserMessage?.text, language)
+
+  if (directAnswerPreference.localDirectAnswer) {
+    return directAnswerPreference.localDirectAnswer
+  }
+
+  const scopedHistory =
+    directAnswerPreference.preferDirectAnswer &&
+    !directAnswerPreference.usePreviousQuestion
+      ? history.filter((message) => message.role === 'user' && message.text.trim() === userInput).slice(-1)
+      : history
+
+  const text = (await callOpenAI(scopedHistory, labels.languageName, directAnswerPreference.preferDirectAnswer)).trim()
 
   if (
     text === OPENAI_MISSING_KEY_MESSAGE ||
@@ -1748,7 +1762,7 @@ async function requestTutorAnswer({
     throw new Error('Missing assistant content')
   }
 
-  if (preferDirectAnswer) {
+  if (directAnswerPreference.preferDirectAnswer) {
     return extractDirectAnswer(text, labels)
   }
 
@@ -1779,9 +1793,15 @@ function buildLocalFallback(
   const previousUserMessage = [...history]
     .reverse()
     .find((message) => message.role === 'user' && message.text !== question)
-  const usePreviousQuestion = shouldUsePreviousQuestion(question, previousUserMessage?.text)
-  const activeQuestion = usePreviousQuestion && previousUserMessage ? previousUserMessage.text : question
-  const preferDirectAnswer = shouldRespondDirectly(question, previousUserMessage?.text)
+  const directAnswerPreference = getDirectAnswerPreference(question, previousUserMessage?.text, language)
+  const usePreviousQuestion = directAnswerPreference.usePreviousQuestion
+  const activeQuestion = directAnswerPreference.activeQuestion
+  const preferDirectAnswer = directAnswerPreference.preferDirectAnswer
+
+  if (directAnswerPreference.localDirectAnswer) {
+    return directAnswerPreference.localDirectAnswer
+  }
+
   const solution = solveSimpleMath(activeQuestion)
   if (!solution) {
     const normalized = activeQuestion.toLowerCase()
@@ -1852,7 +1872,7 @@ function buildLocalFallback(
     return [
       `${t('chatExplanation')}:`,
       usePreviousQuestion ? phrases.followUpExplanation : selected.explanation,
-      previousUserMessage ? `${phrases.followUp} ${previousUserMessage.text}` : '',
+      usePreviousQuestion && previousUserMessage ? `${phrases.followUp} ${previousUserMessage.text}` : '',
       `${phrases.assumptionPrefix} "${activeQuestion.trim()}".`,
       '',
       `${t('chatSteps')}:`,
@@ -2060,23 +2080,53 @@ function shouldUsePreviousQuestion(currentQuestion: string, previousQuestion?: s
 }
 
 function shouldRespondDirectly(currentQuestion: string, previousQuestion?: string) {
+  return getDirectAnswerPreference(currentQuestion, previousQuestion, 'en').preferDirectAnswer
+}
+
+function getDirectAnswerPreference(
+  currentQuestion: string,
+  previousQuestion: string | undefined,
+  language: Language,
+) {
   const usePreviousQuestion = shouldUsePreviousQuestion(currentQuestion, previousQuestion)
   const activeQuestion = usePreviousQuestion && previousQuestion ? previousQuestion : currentQuestion
   const trimmed = activeQuestion.trim()
 
   if (!trimmed) {
-    return false
+    return {
+      usePreviousQuestion,
+      activeQuestion,
+      preferDirectAnswer: false,
+      localDirectAnswer: null as string | null,
+    }
   }
 
-  if (usePreviousQuestion) {
-    return true
+  const mathSolution = solveSimpleMath(trimmed)
+  if (mathSolution) {
+    return {
+      usePreviousQuestion,
+      activeQuestion,
+      preferDirectAnswer: true,
+      localDirectAnswer: String(mathSolution.result),
+    }
   }
 
-  if (solveSimpleMath(trimmed) || extractDefinitionTerm(trimmed)) {
-    return true
+  const definitionTerm = extractDefinitionTerm(trimmed)
+  if (definitionTerm) {
+    return {
+      usePreviousQuestion,
+      activeQuestion,
+      preferDirectAnswer: true,
+      localDirectAnswer: lookupDefinition(definitionTerm, language).answer,
+    }
   }
 
-  return false
+  return {
+    usePreviousQuestion,
+    activeQuestion,
+    preferDirectAnswer: usePreviousQuestion || isSimpleFactQuestion(trimmed),
+    localDirectAnswer: null as string | null,
+  }
 }
 
 function extractDirectAnswer(
@@ -2132,6 +2182,29 @@ function extractDefinitionTerm(input: string) {
   return null
 }
 
+function isSimpleFactQuestion(input: string) {
+  const normalized = input
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s?'-]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!normalized) {
+    return false
+  }
+
+  if (/(explain|why|show|steps|solve|compare|analyze|proof|essay|write|discuss)/i.test(normalized)) {
+    return false
+  }
+
+  const wordCount = normalized.split(' ').filter(Boolean).length
+  if (wordCount > 10) {
+    return false
+  }
+
+  return /^(what|who|when|where|which|whose|how many|how much)\b/.test(normalized)
+}
+
 function lookupDefinition(term: string, language: Language) {
   const cleanedTerm = term.replace(/\b(an|a|the)\b/g, '').trim()
   const key = cleanedTerm.toLowerCase()
@@ -2156,6 +2229,11 @@ function lookupDefinition(term: string, language: Language) {
       en: 'Democracy is a system of government in which the people choose their leaders, usually by voting.',
       es: 'La democracia es un sistema de gobierno en el que las personas eligen a sus líderes, normalmente mediante votación.',
       fr: 'La démocratie est un système de gouvernement dans lequel le peuple choisit ses dirigeants, généralement par le vote.',
+    },
+    homework: {
+      en: 'Homework is school work that a student is asked to complete outside of class, usually at home.',
+      es: 'La tarea es el trabajo escolar que un estudiante debe completar fuera de clase, normalmente en casa.',
+      fr: 'Les devoirs sont le travail scolaire qu’un élève doit faire en dehors de la classe, généralement à la maison.',
     },
   } as const
 
