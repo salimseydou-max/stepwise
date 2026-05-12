@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="StepWise icon">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="10%" x2="100%" y2="90%">
+      <stop offset="0%" stop-color="#ff36d6"/>
+      <stop offset="52%" stop-color="#8438ff"/>
+      <stop offset="100%" stop-color="#2070ff"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="18" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect x="70" y="70" width="884" height="884" rx="240" fill="url(#bg)"/>
+  <ellipse cx="420" cy="350" rx="280" ry="240" fill="#d841ff" opacity="0.25" filter="url(#glow)"/>
+  <ellipse cx="710" cy="360" rx="230" ry="250" fill="#49b7ff" opacity="0.18" filter="url(#glow)"/>
+  <text x="512" y="460" text-anchor="middle" font-size="440" font-weight="700" font-family="DejaVu Sans, Arial, sans-serif" fill="#ffffff">S</text>
+  <g fill="#fff" filter="url(#glow)">
+    <path d="M235 163l12 30 30 12-30 12-12 30-12-30-30-12 30-12z"/>
+    <path d="M765 281l7 17 17 7-17 7-7 17-7-17-17-7 17-7z"/>
+  </g>
+  <rect x="235" y="575" width="554" height="235" rx="78" fill="#922eff"/>
+  <rect x="252" y="590" width="520" height="200" rx="62" fill="#4f27e6" opacity="0.65"/>
+  <path d="M268 575c72 3 136 10 192 13 24 1 38 7 52 20 20 20 32 33 32 43v73c-12 42-58 60-92 58-49-3-119-26-172-58z" fill="#fcf5ff" stroke="#d6bdff" stroke-width="6"/>
+  <path d="M756 575c-72 3-136 10-192 13-24 1-38 7-52 20-20 20-32 33-32 43v73c12 42 58 60 92 58 49-3 119-26 172-58z" fill="#f8f3ff" stroke="#d6bdff" stroke-width="6"/>
+  <path d="M442 593l63 25-31 45-64-27z" fill="#ffbf49" stroke="#ffe2a1" stroke-width="5"/>
+  <path d="M498 615l22 9-32 47-18-7z" fill="#7b5c3a"/>
+</svg>
