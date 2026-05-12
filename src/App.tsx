@@ -752,7 +752,6 @@ function App() {
     try {
       const assistantText = await requestTutorAnswer({
         history: historySnapshot,
-        labels: getSectionLabels(state.language, t),
         language: state.language,
       })
 
@@ -1617,7 +1616,7 @@ const OPENAI_REQUEST_FAILED_MESSAGE = 'OpenRouter request failed.'
 const OPENAI_UNAVAILABLE_MESSAGE = 'OpenRouter is unavailable right now.'
 const OPENAI_RATE_LIMIT_MESSAGE = 'OpenRouter is rate limited right now.'
 
-async function callOpenAI(history: ChatMessage[], languageName: string, preferDirectAnswer: boolean) {
+async function callOpenAI(history: ChatMessage[]) {
   if (!OPENROUTER_API_KEY) {
     return OPENAI_MISSING_KEY_MESSAGE
   }
@@ -1630,28 +1629,58 @@ async function callOpenAI(history: ChatMessage[], languageName: string, preferDi
       content: message.text,
     }))
 
-  const SYSTEM_PROMPT = `
-You are StepWise, an advanced AI homework tutor.
+  const SYSTEM_PROMPT = `You are StepWise AI, an intelligent homework assistant similar to ChatGPT.
 
-Your job is to teach clearly, not just give answers.
+Your job is to ALWAYS answer the user's question directly.
 
-RULES:
-- If the latest question is very simple, such as basic arithmetic, a short definition, or a request for only the answer, respond with only the direct answer.
-- For all other homework questions, respond in a structured format:
-  1. Simple Explanation
-  2. Step-by-Step Breakdown
-  3. Final Answer
-  4. Quick Tip (optional)
+Rules:
+- Never avoid answering simple questions
+- Never ask for clarification unless the input is completely unreadable
+- Always try to solve the problem
+- Be confident and helpful
+- For math:
+  - solve step-by-step
+  - show calculations
+- For science:
+  - explain clearly
+- For general questions:
+  - answer conversationally
 
-- Be clear, direct, and easy to understand.
-- Never be vague or overly general.
-- For non-math questions, still break down the reasoning step-by-step.
-- If something is missing, make a reasonable assumption and clearly state it.
-- Do NOT refuse normal school questions.
-- Keep explanations student-friendly.
-- Respond in ${languageName} unless the student's question clearly asks for another language.
-- The current response mode is ${preferDirectAnswer ? 'direct answer only' : 'full explanation'}.
-`
+Response format:
+
+Explanation:
+(brief explanation)
+
+Step-by-step solution:
+(clear steps)
+
+Final Answer:
+(short direct answer)
+
+Examples:
+
+User: 1+1
+Answer:
+Explanation:
+Adding 1 and 1 gives 2.
+
+Step-by-step solution:
+1 + 1 = 2
+
+Final Answer:
+2
+
+User: What is gravity?
+Answer:
+Explanation:
+Gravity is the force that pulls objects toward each other.
+
+Step-by-step solution:
+1. Objects with mass attract each other.
+2. Earth’s gravity pulls objects toward the ground.
+
+Final Answer:
+Gravity is the force of attraction between objects with mass.`
 
   const requestBody = JSON.stringify({
     model: OPENROUTER_MODEL,
@@ -1718,31 +1747,22 @@ RULES:
 
 async function requestTutorAnswer({
   history,
-  labels,
   language,
 }: {
   history: ChatMessage[]
-  labels: { explanation: string; steps: string; final: string; languageName: string }
   language: Language
 }) {
   const userInput = [...history].reverse().find((message) => message.role === 'user')?.text?.trim() ?? ''
-  const previousUserMessage = [...history]
-    .reverse()
-    .find((message) => message.role === 'user' && message.text.trim() !== userInput)
 
   if (!userInput) {
     throw new Error('Missing user input')
   }
 
-  const directAnswerPreference = getDirectAnswerPreference(userInput, previousUserMessage?.text, language)
+  if (isCompletelyUnreadable(userInput)) {
+    return getUnreadableTutorMessage(language)
+  }
 
-  const scopedHistory =
-    directAnswerPreference.preferDirectAnswer &&
-    !directAnswerPreference.usePreviousQuestion
-      ? history.filter((message) => message.role === 'user' && message.text.trim() === userInput).slice(-1)
-      : history
-
-  const text = (await callOpenAI(scopedHistory, labels.languageName, directAnswerPreference.preferDirectAnswer)).trim()
+  const text = (await callOpenAI(history)).trim()
 
   if (
     text === OPENAI_MISSING_KEY_MESSAGE ||
@@ -1757,25 +1777,7 @@ async function requestTutorAnswer({
     throw new Error('Missing assistant content')
   }
 
-  if (directAnswerPreference.preferDirectAnswer) {
-    return extractDirectAnswer(text, labels)
-  }
-
-  if (text.includes(labels.explanation) && text.includes(labels.steps) && text.includes(labels.final)) {
-    return text
-  }
-
-  return [
-    `${labels.explanation}:`,
-    text,
-    '',
-    `${labels.steps}:`,
-    '1. Review the explanation above.',
-    '2. Apply it directly to the question.',
-    '',
-    `${labels.final}:`,
-    text,
-  ].join('\n')
+  return text
 }
 
 function buildLocalFallback(
@@ -2165,6 +2167,34 @@ function getTutorErrorMessage(error: unknown, t: Translate) {
   }
 
   return t('apiError')
+}
+
+function isCompletelyUnreadable(input: string) {
+  const trimmed = input.trim()
+
+  if (!trimmed) {
+    return true
+  }
+
+  if (/^[^a-zA-Z0-9]+$/.test(trimmed)) {
+    return true
+  }
+
+  if (/^[bcdfghjklmnpqrstvwxyz]{7,}$/i.test(trimmed)) {
+    return true
+  }
+
+  return false
+}
+
+function getUnreadableTutorMessage(language: Language) {
+  const messages = {
+    en: 'Please rewrite your question so I can understand it and solve it for you.',
+    es: 'Vuelve a escribir tu pregunta para que pueda entenderla y resolverla por ti.',
+    fr: 'Veuillez reformuler votre question pour que je puisse la comprendre et la résoudre pour vous.',
+  } as const
+
+  return messages[language]
 }
 
 function escapeRegExp(value: string) {
