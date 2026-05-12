@@ -1617,7 +1617,7 @@ const OPENAI_REQUEST_FAILED_MESSAGE = 'OpenRouter request failed. Using fallback
 const OPENAI_UNAVAILABLE_MESSAGE = 'OpenRouter is unavailable right now. Using fallback tutor mode.'
 const OPENAI_RATE_LIMIT_MESSAGE = 'OpenRouter is rate limited right now. StepWise is using local tutor mode. Check your OpenRouter usage or wait and try again.'
 
-async function callOpenAI(history: ChatMessage[], languageName: string) {
+async function callOpenAI(history: ChatMessage[], languageName: string, preferDirectAnswer: boolean) {
   if (!OPENROUTER_API_KEY) {
     return OPENAI_MISSING_KEY_MESSAGE
   }
@@ -1636,7 +1636,8 @@ You are StepWise, an advanced AI homework tutor.
 Your job is to teach clearly, not just give answers.
 
 RULES:
-- Always respond in a structured format:
+- If the latest question is very simple, such as basic arithmetic, a short definition, or a request for only the answer, respond with only the direct answer.
+- For all other homework questions, respond in a structured format:
   1. Simple Explanation
   2. Step-by-Step Breakdown
   3. Final Answer
@@ -1649,6 +1650,7 @@ RULES:
 - Do NOT refuse normal school questions.
 - Keep explanations student-friendly.
 - Respond in ${languageName} unless the student's question clearly asks for another language.
+- The current response mode is ${preferDirectAnswer ? 'direct answer only' : 'full explanation'}.
 `
 
   const requestBody = JSON.stringify({
@@ -1722,12 +1724,16 @@ async function requestTutorAnswer({
   labels: { explanation: string; steps: string; final: string; languageName: string }
 }) {
   const userInput = [...history].reverse().find((message) => message.role === 'user')?.text?.trim() ?? ''
+  const previousUserMessage = [...history]
+    .reverse()
+    .find((message) => message.role === 'user' && message.text.trim() !== userInput)
 
   if (!userInput) {
     throw new Error('Missing user input')
   }
 
-  const text = (await callOpenAI(history, labels.languageName)).trim()
+  const preferDirectAnswer = shouldRespondDirectly(userInput, previousUserMessage?.text)
+  const text = (await callOpenAI(history, labels.languageName, preferDirectAnswer)).trim()
 
   if (
     text === OPENAI_MISSING_KEY_MESSAGE ||
@@ -1740,6 +1746,10 @@ async function requestTutorAnswer({
 
   if (!text) {
     throw new Error('Missing assistant content')
+  }
+
+  if (preferDirectAnswer) {
+    return extractDirectAnswer(text, labels)
   }
 
   if (text.includes(labels.explanation) && text.includes(labels.steps) && text.includes(labels.final)) {
@@ -1771,6 +1781,7 @@ function buildLocalFallback(
     .find((message) => message.role === 'user' && message.text !== question)
   const usePreviousQuestion = shouldUsePreviousQuestion(question, previousUserMessage?.text)
   const activeQuestion = usePreviousQuestion && previousUserMessage ? previousUserMessage.text : question
+  const preferDirectAnswer = shouldRespondDirectly(question, previousUserMessage?.text)
   const solution = solveSimpleMath(activeQuestion)
   if (!solution) {
     const normalized = activeQuestion.toLowerCase()
@@ -1778,6 +1789,10 @@ function buildLocalFallback(
 
     if (definitionTerm) {
       const definition = lookupDefinition(definitionTerm, language)
+
+      if (preferDirectAnswer) {
+        return definition.answer
+      }
 
       return [
         `${t('chatExplanation')}:`,
@@ -1830,6 +1845,10 @@ function buildLocalFallback(
 
     const selected = topicMap[topic]
 
+    if (preferDirectAnswer) {
+      return selected.finalAnswer
+    }
+
     return [
       `${t('chatExplanation')}:`,
       usePreviousQuestion ? phrases.followUpExplanation : selected.explanation,
@@ -1844,6 +1863,10 @@ function buildLocalFallback(
     ]
       .filter(Boolean)
       .join('\n')
+  }
+
+  if (preferDirectAnswer) {
+    return String(solution.result)
   }
 
   return [
@@ -2034,6 +2057,55 @@ function shouldUsePreviousQuestion(currentQuestion: string, previousQuestion?: s
   return /(just\s*(want|need)?\s*(the)?\s*answer|just\s*(want|need)?\s*(the)?\s*ans|only\s*(the)?\s*answer|answer\s*only|give me (just )?the answer|what'?s the answer|i just ant the ans|just ant the ans)/i.test(
     normalized,
   )
+}
+
+function shouldRespondDirectly(currentQuestion: string, previousQuestion?: string) {
+  const usePreviousQuestion = shouldUsePreviousQuestion(currentQuestion, previousQuestion)
+  const activeQuestion = usePreviousQuestion && previousQuestion ? previousQuestion : currentQuestion
+  const trimmed = activeQuestion.trim()
+
+  if (!trimmed) {
+    return false
+  }
+
+  if (usePreviousQuestion) {
+    return true
+  }
+
+  if (solveSimpleMath(trimmed) || extractDefinitionTerm(trimmed)) {
+    return true
+  }
+
+  return false
+}
+
+function extractDirectAnswer(
+  text: string,
+  labels: { explanation: string; steps: string; final: string; languageName: string },
+) {
+  const finalSectionPatterns = [
+    new RegExp(`${escapeRegExp(labels.final)}\\s*:?[\\s\\n]*([\\s\\S]+)$`, 'i'),
+    /final answer\s*:?\s*([\s\S]+)$/i,
+    /respuesta final\s*:?\s*([\s\S]+)$/i,
+    /réponse finale\s*:?\s*([\s\S]+)$/i,
+  ]
+
+  for (const pattern of finalSectionPatterns) {
+    const match = text.match(pattern)
+    const value = match?.[1]?.trim()
+    if (value) {
+      return value
+    }
+  }
+
+  return text
+    .replace(/^\s*[-*]\s*/gm, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .trim()
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function extractDefinitionTerm(input: string) {
