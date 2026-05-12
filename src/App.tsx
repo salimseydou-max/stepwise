@@ -1385,6 +1385,12 @@ function createId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`
 }
 
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, milliseconds)
+  })
+}
+
 function dayKey(timestamp: number) {
   const date = new Date(timestamp)
   date.setHours(0, 0, 0, 0)

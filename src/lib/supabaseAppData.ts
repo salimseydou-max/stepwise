@@ -52,6 +52,39 @@ const DEFAULT_SETTINGS: RemoteSettings = {
 
 const DEFAULT_CHALLENGES = ['daily-math', 'science-quiz', 'quick-practice'] as const
 
+type SearchRow = {
+  id: string
+  query: string
+  created_at: string
+}
+
+type ChatRow = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+}
+
+type CompletionRow = {
+  id: string
+  completion_key: string
+  question: string
+  completed_at: string
+  day_key: string
+  points: number
+  source_label: string
+}
+
+type ChallengeRow = {
+  challenge_id: string
+  interacted: boolean
+  completed: boolean
+}
+
+type SearchIdRow = {
+  id: string
+}
+
 export async function loadRemoteSnapshot(profileId: string): Promise<RemoteSnapshot> {
   if (!supabase) {
     return buildEmptyRemoteSnapshot()
@@ -98,20 +131,20 @@ export async function loadRemoteSnapshot(profileId: string): Promise<RemoteSnaps
     aiSuggestionsEnabled: profile?.ai_suggestions_enabled ?? DEFAULT_SETTINGS.aiSuggestionsEnabled,
     soundEnabled: profile?.sound_enabled ?? DEFAULT_SETTINGS.soundEnabled,
     recentSearches:
-      searchResult.data?.map((entry) => ({
+      searchResult.data?.map((entry: SearchRow) => ({
         id: entry.id,
         query: entry.query,
         timestamp: new Date(entry.created_at).getTime(),
       })) ?? [],
     chatHistory:
-      messageResult.data?.map((entry) => ({
+      messageResult.data?.map((entry: ChatRow) => ({
         id: entry.id,
         role: entry.role as 'user' | 'assistant',
         text: entry.content,
         timestamp: new Date(entry.created_at).getTime(),
       })) ?? [],
     completionEntries:
-      completionResult.data?.map((entry) => ({
+      completionResult.data?.map((entry: CompletionRow) => ({
         id: entry.id,
         completionKey: entry.completion_key,
         question: entry.question,
@@ -121,7 +154,10 @@ export async function loadRemoteSnapshot(profileId: string): Promise<RemoteSnaps
         sourceLabel: entry.source_label,
       })) ?? [],
     challengeState: Object.fromEntries(
-      (challengeResult.data ?? []).map((entry) => [entry.challenge_id, { interacted: entry.interacted, completed: entry.completed }]),
+      (challengeResult.data ?? []).map((entry: ChallengeRow) => [
+        entry.challenge_id,
+        { interacted: entry.interacted, completed: entry.completed },
+      ]),
     ),
   }
 }
@@ -222,7 +258,7 @@ export async function saveRemoteSearch(profileId: string, entry: RemoteSearchEnt
     .order('created_at', { ascending: false })
     .range(limit, limit + 100)
 
-  const idsToDelete = extraRows.data?.map((row) => row.id) ?? []
+  const idsToDelete = extraRows.data?.map((row: SearchIdRow) => row.id) ?? []
   if (idsToDelete.length > 0) {
     await supabase.from('recent_searches').delete().in('id', idsToDelete)
   }
